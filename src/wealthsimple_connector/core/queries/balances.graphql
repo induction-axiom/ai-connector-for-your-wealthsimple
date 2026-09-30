@@ -1,0 +1,14 @@
+query PortfolioBalances($ids: [String!]!) {
+  accounts(ids: $ids) {
+    id
+    custodianAccounts {
+      id
+      financials {
+        __typename
+        ... on CustodianAccountFinancialsSo {
+          balance(type: TRADING) { quantity securityId }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,40 @@
+query PortfolioPositions($identityId: ID!, $currency: Currency!, $first: Int!, $cursor: String) {
+  identity(id: $identityId) {
+    financials {
+      current(currency: $currency) {
+        positions(first: $first, after: $cursor, aggregated: false) {
+          pageInfo { hasNextPage endCursor }
+          totalCount
+          status
+          edges {
+            node {
+              __typename
+              id
+              accounts { id }
+              quantity
+              positionDirection
+              strategyType
+              bookValue { amount currency }
+              averagePrice { amount currency }
+              totalValue { amount currency }
+              unrealizedReturns { amount currency }
+              security {
+                id
+                securityType
+                currency
+                stock { symbol name }
+              }
+              legs {
+                quantity
+                positionDirection
+                security { id }
+                bookValue { amount currency }
+                totalValue { amount currency }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

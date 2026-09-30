@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AI connector for your Wealthsimple</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body class="owner-page">
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="#overview" aria-label="Overview">
+        <span class="brand-name">AI connector for your Wealthsimple</span>
+      </a>
+      <a id="project" class="project hidden" target="_blank" rel="noopener" title="Open this project in the Firebase console">
+        <span class="project-dot" aria-hidden="true"></span><span id="project-id"></span><span aria-hidden="true">↗</span>
+      </a>
+      <nav id="tabs" class="tabs hidden" aria-label="Sections">
+        <a href="#overview" data-view="overview">Overview</a>
+        <a href="#developer" data-view="developer">Developer</a>
+      </nav>
+      <div id="account" class="account hidden">
+        <span id="identity" class="identity"></span>
+        <button id="signout" class="link-button" type="button">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="update" class="update hidden" role="status">
+    <span id="update-text"></span>
+    <a id="update-notes" target="_blank" rel="noopener">What's new</a>
+    <button id="update-how" class="link-button" type="button">How to update</button>
+  </div>
+
+  <main>
+    <!-- Signed out -->
+    <section id="signin-view" class="view hero">
+      <p class="eyebrow">Private · Read-only · Self-hosted</p>
+      <h1>Your portfolio,<br>ready for your AI.</h1>
+      <p class="lede">Sign in with the Google account that owns this deployment.</p>
+      <div class="actions">
+        <button id="signin" class="pill" type="button" disabled>Sign in with Google</button>
+      </div>
+      <p id="signin-message" class="note" role="status">Loading…</p>
+    </section>
+
+    <!-- Overview: status, the apps that read your data, and the data itself -->
+    <section id="overview-view" class="view hidden" data-view="overview">
+      <div id="overview-hero" class="hero" data-tone="neutral">
+        <p class="status-pill"><span class="dot" aria-hidden="true"></span><span id="status-label">Checking</span></p>
+        <h1 id="status-title">Checking your connector…</h1>
+        <p id="status-summary" class="lede"></p>
+        <div class="actions">
+          <button id="primary-action" class="pill" type="button" disabled>Sync now</button>
+        </div>
+        <p id="message" class="note" role="status" aria-live="polite"></p>
+      </div>
+
+      <div id="connect-panel" class="panel connect hidden">
+        <h2>Sign in to Wealthsimple</h2>
+        <p class="panel-note">Your email and password go straight to Wealthsimple through your own deployment. They are never saved or shown to your AI.</p>
+        <form id="connect-form">
+          <div id="credential-fields">
+            <label>Email<input id="username" type="email" autocomplete="username" required maxlength="254"></label>
+            <label>Password<input id="password" type="password" autocomplete="current-password" required maxlength="1024"></label>
+          </div>
+          <label id="otp-field" class="hidden">Verification code
+            <input id="otp" inputmode="numeric" autocomplete="one-time-code" minlength="4" maxlength="20">
+            <span id="otp-hint" class="hint"></span>
+          </label>
+          <button id="connect-submit" class="pill wide" type="submit">Continue</button>
+        </form>
+      </div>
+
+      <div class="section-head" id="apps">
+        <h2>AI apps</h2>
+      </div>
+      <div class="panel">
+        <p class="panel-note">Add this address to an AI app. It asks you to sign in with this Google account, then reads your saved data.</p>
+        <div class="copy-field">
+          <code id="mcp-url">—</code>
+          <button id="copy-url" class="pill small" type="button">Copy</button>
+        </div>
+        <div class="platforms">
+          <button class="platform" type="button" data-guide="gemini">
+            <strong>Gemini</strong><span class="chip success">Supported</span><span class="platform-link">How to connect ›</span>
+          </button>
+          <button class="platform" type="button" data-guide="claude">
+            <strong>Claude</strong><span class="chip success">Supported</span><span class="platform-link">How to connect ›</span>
+          </button>
+          <button class="platform" type="button" data-guide="chatgpt">
+            <strong>ChatGPT</strong><span class="chip success">Supported</span><span class="platform-link">How to connect ›</span>
+          </button>
+        </div>
+        <h3 class="subhead">Connected now</h3>
+        <ul id="apps-list" class="rows"><li class="row muted">Loading…</li></ul>
+      </div>
+
+      <div class="section-head">
+        <h2>Your data</h2>
+        <div class="section-links">
+          <button id="toggle-amounts" class="link-button" type="button" aria-pressed="false">Show amounts</button>
+          <a id="open-firestore" class="link-button" target="_blank" rel="noopener">Open in Firestore ↗</a>
+          <button id="ws-signout" class="link-button danger hidden" type="button">Sign out of Wealthsimple</button>
+        </div>
+      </div>
+      <div class="tiles">
+        <article class="tile">
+          <p class="tile-kicker">Holdings<span class="kicker-note">Return since purchase</span></p>
+          <p class="total"><span id="holdings-total" class="figure">—</span><span class="figure-label" id="holdings-caption">across — positions</span></p>
+          <ul id="holdings" class="list"></ul>
+          <p class="tile-footer"><span id="portfolio-updated">Not synced yet</span><span id="portfolio-chip" class="chip">—</span></p>
+        </article>
+        <article class="tile">
+          <p class="tile-kicker">Recent activity</p>
+          <ul id="recent" class="list"></ul>
+          <p class="tile-footer"><span id="activity-updated">Not synced yet</span><span id="activity-chip" class="chip">—</span></p>
+        </article>
+      </div>
+
+      <div class="section-head">
+        <h2>Your Firebase project</h2>
+      </div>
+      <div class="panel">
+        <p class="panel-note">Everything runs in your own project. Each link opens it in the Firebase or Google Cloud console.</p>
+        <ul id="resources" class="resources"></ul>
+      </div>
+    </section>
+
+    <!-- Developer: see exactly what the AI sees -->
+    <section id="developer-view" class="view hidden" data-view="developer">
+      <div class="hero compact">
+        <h1>What your AI sees.</h1>
+        <p class="lede">The exact saved data your AI tools return. Viewing it never contacts Wealthsimple.</p>
+      </div>
+
+      <div class="panel split">
+        <div>
+          <h2>Sync one part</h2>
+          <p class="panel-note">Useful when checking a single data path.</p>
+          <div class="actions left">
+            <button id="refresh-portfolio" class="pill secondary" type="button">Sync portfolio</button>
+            <button id="refresh-activities" class="pill secondary" type="button">Sync activity</button>
+          </div>
+          <p id="developer-message" class="note" role="status" aria-live="polite"></p>
+        </div>
+        <div>
+          <h2>Deployment</h2>
+          <dl class="facts">
+            <div><dt>Version</dt><dd id="fact-version">—</dd></div>
+            <div><dt>Source code</dt><dd id="fact-source">—</dd></div>
+            <div><dt>Wealthsimple session</dt><dd id="fact-session">—</dd></div>
+            <div><dt>Last sync result</dt><dd id="fact-sync"><code>—</code></dd></div>
+            <div><dt>Activity sync result</dt><dd id="fact-activity"><code>—</code></dd></div>
+          </dl>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Tool output</h2>
+          <div class="segmented" role="group" aria-label="Tool output">
+            <button id="preview-portfolio" type="button" aria-pressed="true">get_portfolio</button>
+            <button id="preview-activities" type="button" aria-pressed="false">list_activities</button>
+          </div>
+        </div>
+        <pre id="preview-output" class="code">Loading…</pre>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="guide" class="sheet" aria-labelledby="guide-title">
+    <form method="dialog"><button class="sheet-close" aria-label="Close">×</button></form>
+    <h2 id="guide-title"></h2>
+    <div id="guide-body"></div>
+  </dialog>
+
+     </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Unofficial and self-hosted. Not affiliated with Wealthsimple.</span>
+    <a id="source" class="hidden" target="_blank" rel="noopener">Source code on GitHub ↗</a>
+  </footer>
+  <script type="module" src="/assets/owner.js"></script>
+</body>
+</html>

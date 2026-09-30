@@ -1,0 +1,8 @@
+*
+!Dockerfile
+!requirements.txt
+!*.py
+!static/
+!static/**
+!wealthsimple_connector/
+!wealthsimple_connector/**

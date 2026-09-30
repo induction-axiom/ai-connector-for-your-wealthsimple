@@ -1,0 +1,4 @@
+mcp==2.2.0
+firebase-admin==7.7.0
+google-cloud-firestore==2.31.0
+uvicorn==0.41.0

@@ -1,0 +1,22 @@
+query PortfolioAccounts($identityId: ID!, $first: Int!, $cursor: String) {
+  identity(id: $identityId) {
+    accounts(filter: {}, first: $first, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      edges {
+        node {
+          __typename
+          id
+          type
+          status
+          currency
+          supportedCurrencies
+          financials {
+            currentCombined {
+              netLiquidationValue { amount currency }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+firebase-functions==0.6.0
+google-cloud-firestore==2.31.0
+google-cloud-secret-manager==2.30.0
+curl-cffi==0.16.3

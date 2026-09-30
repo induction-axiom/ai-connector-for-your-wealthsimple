@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Dashboard browser tests; development only, never deployed.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

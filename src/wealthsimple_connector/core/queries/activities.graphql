@@ -1,0 +1,32 @@
+query ListActivities($first: Int!, $cursor: Cursor, $condition: ActivityCondition) {
+  activityFeedItems(
+    first: $first
+    after: $cursor
+    condition: $condition
+    orderBy: [OCCURRED_AT_DESC]
+    accountScope: OWN
+  ) {
+    edges {
+      node {
+        accountId
+        canonicalId
+        type
+        subType
+        status
+        occurredAt
+        amount
+        amountSign
+        currency
+        spendMerchant
+        aftOriginatorName
+        aftTransactionCategory
+        aftTransactionType
+        assetSymbol
+        assetQuantity
+        fees
+        realizedPnl
+      }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}

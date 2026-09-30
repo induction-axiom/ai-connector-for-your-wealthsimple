@@ -1,0 +1,23 @@
+{
+  "indexes": [
+    {"collectionGroup": "activities", "queryScope": "COLLECTION", "fields": [
+      {"fieldPath": "occurred_ts", "order": "DESCENDING"},
+      {"fieldPath": "activity_ref", "order": "DESCENDING"}]},
+    {"collectionGroup": "activities", "queryScope": "COLLECTION", "fields": [
+      {"fieldPath": "kind", "order": "ASCENDING"},
+      {"fieldPath": "occurred_ts", "order": "DESCENDING"},
+      {"fieldPath": "activity_ref", "order": "DESCENDING"}]},
+    {"collectionGroup": "activities", "queryScope": "COLLECTION", "fields": [
+      {"fieldPath": "account_ref", "order": "ASCENDING"},
+      {"fieldPath": "occurred_ts", "order": "DESCENDING"},
+      {"fieldPath": "activity_ref", "order": "DESCENDING"}]},
+    {"collectionGroup": "activities", "queryScope": "COLLECTION", "fields": [
+      {"fieldPath": "account_ref", "order": "ASCENDING"},
+      {"fieldPath": "kind", "order": "ASCENDING"},
+      {"fieldPath": "occurred_ts", "order": "DESCENDING"},
+      {"fieldPath": "activity_ref", "order": "DESCENDING"}]}
+  ],
+  "fieldOverrides": [
+    {"collectionGroup": "portfolio_snapshots", "fieldPath": "payload_json", "indexes": []}
+  ]
+}

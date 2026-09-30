@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Allow access · AI connector for your Wealthsimple</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body class="owner-page">
+  <header class="nav">
+    <div class="nav-inner">
+      <span class="brand">
+        <span class="brand-name">AI connector for your Wealthsimple</span>
+      </span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero compact">
+      <p class="eyebrow">Connection request</p>
+      <h1>Allow <span id="app-name">this app</span> to read your Wealthsimple data?</h1>
+      <p id="description" class="lede">Checking the request…</p>
+    </section>
+
+    <div class="panel connect consent">
+      <h2>It will be able to</h2>
+      <p id="scope" class="panel-note">…</p>
+      <dl class="facts">
+        <div><dt>You return to</dt><dd id="callback">…</dd></div>
+      </dl>
+      <p id="client" class="hint"></p>
+
+      <p id="signin-note" class="panel-note">First sign in with the Google account that owns this connector. This page never asks for your Wealthsimple password.</p>
+      <button id="signin" class="pill wide" type="button" disabled>Sign in with Google</button>
+      <div id="decision" class="actions hidden">
+        <button id="deny" class="pill secondary" type="button" disabled>Don't allow</button>
+        <button id="approve" class="pill" type="button" disabled>Allow</button>
+      </div>
+      <p id="identity" class="note"></p>
+      <p id="status" class="note" role="status">Loading…</p>
+    </div>
+  </main>
+
+  <footer class="footer">Unofficial and self-hosted. Not affiliated with Wealthsimple.</footer>
+  <script type="module" src="/assets/consent.js"></script>
+</body>
+</html>
