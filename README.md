@@ -12,9 +12,16 @@ from a private connector that runs in your own Firebase project.
 - **One page to manage it.** The dashboard shows your holdings, recent
   activity and connected AI apps, and is where you sign in to Wealthsimple.
 
+A simulated example, with made-up numbers:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/example-spending-dark.png">
+  <img alt="Simulated example: asked about August card spending, the AI answers with net spending after refunds, pending purchases listed separately, and the top five merchants" src="docs/images/example-spending-light.png" width="480">
+</picture>
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/overview-dark.png">
-  <img alt="Dashboard overview: Gemini and Claude can read your portfolio, with holdings shown as weights and returns since purchase, and recent activity" src="docs/images/overview-light.png">
+  <img alt="Dashboard overview: Gemini and Claude can read your portfolio, with holdings shown as weights and returns since purchase, and recent activity" src="docs/images/overview-light.png" width="640">
 </picture>
 
 This project is unofficial and not affiliated with Wealthsimple. It reads
@@ -61,7 +68,15 @@ In the dashboard: **AI apps** → your app → **How to connect**.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/connect-chatgpt-dark.png">
-  <img alt="Step-by-step sheet for connecting ChatGPT, with the address to copy" src="docs/images/connect-chatgpt-light.png" width="640">
+  <img alt="Step-by-step sheet for connecting ChatGPT, with the address to copy" src="docs/images/connect-chatgpt-light.png" width="520">
+</picture>
+
+Then just ask. A scheduled task in your AI app can also send you a weekly
+check-in (simulated, with made-up numbers):
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/example-weekly-checkin-dark.png">
+  <img alt="Simulated example: a weekly scheduled task summarizes new trades, dividends and card spending compared with the week before" src="docs/images/example-weekly-checkin-light.png" width="480">
 </picture>
 
 ## What gets created
@@ -70,7 +85,7 @@ Everything lives in your Firebase project, and the dashboard links each piece:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/apps-and-cloud-dark.png">
-  <img alt="Dashboard sections for AI apps and for your Firebase project's resources, each linking to the Firebase or Google Cloud console" src="docs/images/apps-and-cloud-light.png">
+  <img alt="Dashboard sections for AI apps and for your Firebase project's resources, each linking to the Firebase or Google Cloud console" src="docs/images/apps-and-cloud-light.png" width="560">
 </picture>
 
 ## Later
