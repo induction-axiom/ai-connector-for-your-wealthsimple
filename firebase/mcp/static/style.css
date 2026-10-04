@@ -188,6 +188,8 @@ input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 4px co
 .row strong { display: block; font-weight: 600; }
 .row span { color: var(--muted); font-size: 13px; }
 .row.muted { color: var(--muted); font-size: 15px; }
+/* The panel's padding ends a list; its last row adds none. */
+.panel .rows > .row:last-child { padding-bottom: 0; }
 
 /* How-to sheet */
 .sheet { width: min(560px, 100% - 32px); max-height: min(720px, 100% - 64px); padding: 36px 36px 28px; border: 0; border-radius: 28px; background: var(--surface); color: var(--ink); box-shadow: 0 30px 80px rgba(0, 0, 0, .25); }
