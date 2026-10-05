@@ -9,15 +9,20 @@ const CONTROLS = ["primary-action", "connect-submit", "refresh-portfolio", "refr
   "ws-signout"];
 
 const FIREBASE_APP = "export const initializeApp = config => ({config});";
-const FIREBASE_AUTH = `
+const OWNER = "owner@example.com";
+// Signed in as `email` on load; signing out tells the page, as Firebase does.
+const firebaseAuth = email => `
+  let listener;
   export const getAuth = app => ({app});
   export class GoogleAuthProvider { setCustomParameters() {} }
   export const browserSessionPersistence = "session";
   export const setPersistence = async () => {};
   export const signInWithPopup = async () => {};
-  export const signOut = async () => {};
-  export const onAuthStateChanged = (auth, callback) => setTimeout(() => callback(
-    {email: "owner@example.com", getIdToken: async () => "synthetic-owner-token"}));
+  export const signOut = async () => listener(null);
+  export const onAuthStateChanged = (auth, callback) => {
+    listener = callback;
+    setTimeout(() => callback({email: "${email}", getIdToken: async () => "synthetic-token"}));
+  };
 `;
 
 function status(connection) {
@@ -36,7 +41,7 @@ function status(connection) {
 
 // Serve the dashboard; each /owner/refresh waits until the test settles it. Sign-in replies
 // with each of `challenges` first, then succeeds.
-async function openConsole(page, extra = {}, challenges = []) {
+async function openConsole(page, extra = {}, challenges = [], email = OWNER) {
   const state = {connection: "reconnect_required", refreshes: [], errors: []};
   page.on("pageerror", error => state.errors.push(error.message));
   await page.route("**/*", async route => {
@@ -44,7 +49,7 @@ async function openConsole(page, extra = {}, challenges = []) {
     const json = body => route.fulfill({contentType: "application/json", body: JSON.stringify(body)});
     if (url.hostname === "www.gstatic.com")
       return route.fulfill({contentType: "text/javascript",
-        body: url.pathname.endsWith("firebase-auth.js") ? FIREBASE_AUTH : FIREBASE_APP});
+        body: url.pathname.endsWith("firebase-auth.js") ? firebaseAuth(email) : FIREBASE_APP});
     if (url.origin !== BASE) return route.fulfill({status: 404, body: ""});
     if (url.pathname === "/owner")
       return route.fulfill({contentType: "text/html", body: readFileSync(new URL("owner.html", STATIC))});
@@ -54,6 +59,10 @@ async function openConsole(page, extra = {}, challenges = []) {
         body: readFileSync(new URL(name, STATIC))});
     }
     if (url.pathname === "/firebase-config") return json({authDomain: "example.test"});
+    if (url.pathname === "/owner/status" && email !== OWNER) return new Promise(settle => {
+      state.turnAway = () => route.fulfill({status: 403, contentType: "application/json",
+        body: JSON.stringify({error: "owner_login_required"})}).then(settle);
+    });
     if (url.pathname === "/owner/status") return json({...status(state.connection), ...extra});
     if (url.pathname === "/owner/reconnect") {
       if (challenges.length) return json(challenges.shift());
@@ -175,5 +184,20 @@ test("recent activity fills the height beside holdings, and no more", async ({pa
   });
   const [, taller] = await heights();
   expect(taller).toBeGreaterThan(holdings);
+  expect(state.errors).toEqual([]);
+});
+
+test("another Google account is turned away before the dashboard shows", async ({page}) => {
+  const state = await openConsole(page, {}, [], "someone@example.com");
+  await expect(page.locator("#signin-message")).toHaveText("Checking your account…");
+  await expect.poll(() => typeof state.turnAway).toBe("function");
+  await expect(page.locator("#overview-view")).toBeHidden();
+  await expect(page.locator("#account")).toBeHidden();
+  await state.turnAway();
+  await expect(page.locator("#signin-message")).toHaveText(
+    "someone@example.com doesn't own this deployment. Sign in with the account that does.");
+  await expect(page.locator("#signin-message")).toHaveAttribute("data-tone", "danger");
+  await expect(page.locator("#signin")).toBeEnabled();
+  await expect(page.locator("#overview-view")).toBeHidden();
   expect(state.errors).toEqual([]);
 });

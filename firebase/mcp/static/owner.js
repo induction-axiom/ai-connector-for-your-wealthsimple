@@ -737,20 +737,23 @@ el("refresh-activities").onclick = () => sync(["activities"], "developer-message
 async function signedIn(value) {
   user = value;
   el("identity").textContent = user.email;
-  showSignedIn(true);
+  // The dashboard stays hidden until the first request shows this is the owner.
+  say("signin-message", "Checking your account…");
   try {
     await loadStatus();
   } catch (error) {
     // The first request is also where a non-owner Google account is turned away.
-    if (error instanceof OwnerSessionExpired)
-      return expireSession("Sign in with the Google account that owns this deployment.");
+    if (error instanceof OwnerSessionExpired) return expireSession(
+      `${user.email} doesn't own this deployment. Sign in with the account that does.`, "danger");
     say("message", "Your connector's status couldn't be loaded. Try reloading.", "danger");
   }
+  say("signin-message", "");
+  showSignedIn(true);
 }
 
-async function expireSession(text = "Your sign-in expired. Sign in again to continue.") {
+async function expireSession(text = "Your sign-in expired. Sign in again to continue.", tone = "neutral") {
   await signOut(auth);
-  say("signin-message", text);
+  say("signin-message", text, tone);
 }
 
 function signedOut() {
@@ -788,7 +791,6 @@ el("signin").onclick = async () => {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({prompt: "select_account"});
     await signInWithPopup(auth, provider);
-    say("signin-message", "");
   } catch {
     say("signin-message", "Sign-in wasn't completed.");
     el("signin").disabled = false;
