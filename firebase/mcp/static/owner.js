@@ -479,12 +479,12 @@ el("connect-form").onsubmit = async event => {
 // ---------- AI apps ----------
 
 function appName(app) {
-  // Gemini registers under the name "Google"; its callback host is clearer.
-  if (app.redirect_host === "oauth-redirect.googleusercontent.com") return "Gemini";
-  if (app.name) return app.name;
-  if (app.redirect_host === "chatgpt.com") return "ChatGPT";
-  if (app.redirect_host === "claude.ai" || app.redirect_host === "claude.com") return "Claude";
-  return app.redirect_host || "Unknown app";
+  // Named by callback host, never by the name an app registers with: any app can register and call itself "Claude".
+  const host = app.redirect_host;
+  if (host === "oauth-redirect.googleusercontent.com") return "Gemini";
+  if (host === "chatgpt.com") return "ChatGPT";
+  if (host === "claude.ai" || host === "claude.com") return "Claude";
+  return host || "Unknown app";
 }
 
 function emptyRow(text) {
