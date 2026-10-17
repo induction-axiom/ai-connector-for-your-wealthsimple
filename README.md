@@ -1,7 +1,8 @@
 # Private AI connector for your Wealthsimple
 
-Ask Gemini, Claude or ChatGPT about your Wealthsimple portfolio and activity,
-from a private connector that runs in your own Firebase project.
+Ask Gemini, Claude, ChatGPT or any other MCP app about your Wealthsimple
+portfolio and activity, from a private connector that runs in your own
+Firebase project.
 
 A simulated example, with made-up numbers:
 
