@@ -208,8 +208,8 @@ class OAuthTests(unittest.TestCase):
         self.assertEqual(self.client.post("/token", data=body).status_code, 400)
         self.assertEqual(self.mcp(r.json()["access_token"]).status_code, 401)
 
-    def test_refresh_may_omit_resource_but_not_name_another(self):
-        # Gemini sends resource when exchanging the code but not when refreshing.
+    def test_client_may_omit_resource_but_not_name_another(self):
+        # Gemini sends resource when exchanging the code but not when refreshing; Muse never sends it.
         t = self.tokens()
         body = {"grant_type": "refresh_token", "refresh_token": t["refresh_token"], "client_id": self.client_id}
         other = self.client.post("/token", data={**body, "resource": "https://evil.example/mcp"})
@@ -217,11 +217,19 @@ class OAuthTests(unittest.TestCase):
         r = self.client.post("/token", data=body)
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(self.mcp(r.json()["access_token"]).status_code, 200)
-        # A code exchange still has to name this endpoint.
+        # Authorize and code exchange without resource: both are bound to this endpoint.
+        params = {"client_id": self.client_id, "response_type": "code", "redirect_uri": CALLBACK,
+                  "scope": SCOPE, "state": "synthetic-state", "code_challenge": self.challenge,
+                  "code_challenge_method": "S256"}
+        r = self.client.get("/authorize", params=params)
+        self.assertTrue(r.headers["location"].startswith(BASE + "/consent#"), r.headers.get("location"))
+        ticket = parse_qs(urlsplit(r.headers["location"]).fragment)["request"][0]
+        self.assertEqual(self.store.data[key("pending", ticket)]["params"]["resource"], BASE + "/mcp")
         code = self.get_code()
         r = self.client.post("/token", data={"grant_type": "authorization_code", "code": code,
             "client_id": self.client_id, "redirect_uri": CALLBACK, "code_verifier": self.verifier})
-        self.assertEqual(r.json()["error"], "invalid_target")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.mcp(r.json()["access_token"]).status_code, 200)
 
     def test_revoke_and_expiry(self):
         t = self.tokens()

@@ -93,6 +93,9 @@ class Provider:
             "client": client_info.model_dump(mode="json"), "created_at": self.clock()}}))
 
     async def authorize(self, client, params):
+        # Some MCP clients (e.g. Muse) leave out RFC 8707's resource; we serve only one, so assume it.
+        if params.resource is None:
+            params = params.model_copy(update={"resource": self.config.resource})
         if params.resource != self.config.resource:
             raise AuthorizeError("invalid_target", "The resource must match this MCP endpoint")
         if params.scopes != [self.config.scope] or not params.state or len(params.state) > 512:

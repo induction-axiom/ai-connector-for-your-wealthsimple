@@ -201,14 +201,11 @@ class Boundary:
                 logging.warning("token_rejected invalid_request repeated_or_unreadable_params")
             return None, ({"error": "invalid_request"}, 400)
         # The SDK checks PKCE and callbacks but does not bind the token request's resource.
-        # A refresh may leave it out (RFC 8707 §2.2): the refresh token is already bound to it.
+        # It may be left out (RFC 8707 §2.2): the code or refresh token is already bound to this endpoint.
         resource = params.get("resource")
-        refreshing = params.get("grant_type") == ["refresh_token"]
-        if path == "/token" and method == "POST" and resource != [self.config.resource] and (
-                resource is not None or not refreshing):
-            logging.warning("token_rejected invalid_target grant_type=%s resource=%s",
-                            (params.get("grant_type") or ["missing"])[0][:40],
-                            "missing" if resource is None else "other")
+        if path == "/token" and method == "POST" and resource is not None and resource != [self.config.resource]:
+            logging.warning("token_rejected invalid_target grant_type=%s resource=other",
+                            (params.get("grant_type") or ["missing"])[0][:40])
             return None, ({"error": "invalid_target"}, 400)
         return params, None
 
