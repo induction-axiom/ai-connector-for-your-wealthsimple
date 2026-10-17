@@ -137,9 +137,19 @@ class OAuthTests(unittest.TestCase):
             self.assertTrue(r.status_code == 400 or "error=" in r.headers.get("location", ""))
             if "location" in r.headers:
                 self.assertIn("iss=", r.headers["location"])
-        r = self.client.post("/register", json={"redirect_uris": ["https://evil.example"],
-            "token_endpoint_auth_method": "none", "scope": SCOPE})
-        self.assertEqual(r.status_code, 400)
+        for bad in ["http://evil.example/callback", "myapp://callback", "javascript:alert(1)",
+                    "https://evil.example/callback#x", "https://claude.ai@evil.example/callback",
+                    "http://localhost.evil.example/callback"]:
+            r = self.client.post("/register", json={"redirect_uris": [bad],
+                "token_endpoint_auth_method": "none", "scope": SCOPE})
+            self.assertEqual(r.status_code, 400, bad)
+
+    def test_any_https_or_local_app_can_register_and_connect(self):
+        for callback in ["https://agent.meta.ai/api/hatch/oauth/callback", "http://localhost:33418/callback",
+                         "http://127.0.0.1:8080/oauth/callback", "http://[::1]:9000/cb"]:
+            r = self.begin(client_id=self.register(redirect_uris=[callback]), redirect_uri=callback)
+            self.assertEqual(r.status_code, 302, callback)
+            self.assertTrue(r.headers["location"].startswith(BASE + "/consent#"), callback)
 
     def test_claude_registers_without_scope(self):
         # Claude's registration omits scope; the server fills in the only one it offers.
@@ -147,11 +157,8 @@ class OAuthTests(unittest.TestCase):
             "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"], "token_endpoint_auth_method": "none",
             "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"]})
         self.assertEqual(r.status_code, 201, r.text)
-        r = self.client.post("/register", json={"redirect_uris": ["https://claude.ai/api/mcp/other"],
-            "token_endpoint_auth_method": "none", "scope": SCOPE})
-        self.assertEqual(r.status_code, 400)
 
-    def test_gemini_registers_production_callbacks_for_this_host(self):
+    def test_gemini_registers_production_callbacks_only(self):
         # Gemini's real registration: three hosts, each under /r/ and /a/, naming this host.
         tail = "/user_bound_custom-mcp-123456789-connector_example"
         uris = [f"https://oauth-redirect{env}.googleusercontent.com/{kind}{tail}"
@@ -161,21 +168,20 @@ class OAuthTests(unittest.TestCase):
             "response_types": ["code"]})
         self.assertEqual(r.status_code, 201, r.text)
         self.assertEqual(r.json()["redirect_uris"], [f"https://oauth-redirect.googleusercontent.com/{k}{tail}" for k in "ra"])
-        for bad in ["https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-1-other_example",
-                    "https://oauth-redirect.googleusercontent.com/x" + tail,
-                    "https://oauth-redirect-sandbox.googleusercontent.com/r" + tail]:
-            r = self.client.post("/register", json={"redirect_uris": [bad], "token_endpoint_auth_method": "none"})
-            self.assertEqual(r.status_code, 400, bad)
+        # Sandbox alone leaves no callback to keep.
+        r = self.client.post("/register", json={"token_endpoint_auth_method": "none",
+            "redirect_uris": ["https://oauth-redirect-sandbox.googleusercontent.com/r" + tail]})
+        self.assertEqual(r.status_code, 400)
 
     def test_rejected_registration_is_logged_without_query_strings(self):
         with self.assertLogs(level="WARNING") as logs:
             r = self.client.post("/register", json={"client_name": "Gemini",
-                "redirect_uris": ["https://oauth-redirect.googleusercontent.com/r/x?state=secret"],
+                "redirect_uris": ["http://oauth-redirect.googleusercontent.com/r/x?state=secret"],
                 "token_endpoint_auth_method": "client_secret_basic", "scope": SCOPE})
         self.assertEqual(r.status_code, 400)
         line = next(m for m in logs.output if "register_rejected" in m)
         self.assertIn("client_secret_basic", line)
-        self.assertIn("https://oauth-redirect.googleusercontent.com/r/x", line)
+        self.assertIn("http://oauth-redirect.googleusercontent.com/r/x", line)
         self.assertNotIn("state=secret", line)
 
     def test_code_reuse_revokes_grant(self):

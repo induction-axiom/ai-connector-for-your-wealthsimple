@@ -22,9 +22,14 @@ try {
     fetch("/firebase-config").then(r => r.json()), post("/consent/start", {request: ticket})]);
   csrf = view.csrf;
   const host = new URL(view.redirect_uri).hostname;
-  if (host === "oauth-redirect.googleusercontent.com") el("app-name").textContent = "Gemini";
-  if (host === "chatgpt.com") el("app-name").textContent = "ChatGPT";
-  if (host === "claude.ai" || host === "claude.com") el("app-name").textContent = "Claude";
+  const known = {"oauth-redirect.googleusercontent.com": "Gemini", "chatgpt.com": "ChatGPT",
+    "claude.ai": "Claude", "claude.com": "Claude"}[host];
+  el("app-name").textContent = known || host;
+  if (!known) {
+    el("unfamiliar").textContent = "This isn't Claude, ChatGPT or Gemini. Only allow it if you just added " +
+      "this connector to the app at " + host + " yourself.";
+    el("unfamiliar").classList.remove("hidden");
+  }
   el("description").textContent = "Your AI app is asking to connect to your own private AI connector for Wealthsimple.";
   el("scope").textContent = "Read your accounts, holdings and activity, and ask for fresh data from Wealthsimple. " +
     "It can't trade, move money, or see your Wealthsimple password. It stays connected while you use it; " +

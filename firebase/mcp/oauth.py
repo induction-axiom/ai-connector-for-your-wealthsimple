@@ -32,13 +32,12 @@ def random_token():
 
 # A connected app stays signed in while it is used; 90 days without use ends the grant.
 GRANT_IDLE_SECONDS = 90 * 86400
-# Claude web, desktop, mobile and Cowork share this callback; Anthropic asks allowlists to include the claude.com one too.
-CLAUDE_CALLBACKS = ("https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback")
 # Gemini registers six callbacks: production, sandbox and test hosts, each under /r/ and /a/.
-# We keep production only. The path names the Gemini user and our host with dots as underscores.
-GEMINI_HOST = "https://oauth-redirect.googleusercontent.com/"
+# We keep production only.
 GEMINI_UNUSED = ("https://oauth-redirect-sandbox.googleusercontent.com/",
                  "https://oauth-redirect-test.googleusercontent.com/")
+# Apps running on the owner's own computer call back over plain http (RFC 8252 §7.3).
+LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 
 class ConsentError(Exception):
@@ -56,14 +55,21 @@ class Provider:
         return await anyio.to_thread.run_sync(self.store.transact, keys, change)
 
     def valid_redirect(self, uri):
-        return (uri in CLAUDE_CALLBACKS or uri == "https://chatgpt.com/connector_platform_oauth_redirect"
-                or bool(re.fullmatch(r"https://chatgpt\.com/connector/oauth/[A-Za-z0-9_-]{1,160}", uri))
-                or self.gemini_redirect(uri)
-                or uri in self.config.test_redirects)
-
-    def gemini_redirect(self, uri):
-        ours = re.escape(urlsplit(self.config.base_url).netloc.replace(".", "_"))
-        return bool(re.fullmatch(re.escape(GEMINI_HOST) + r"[ra]/user_bound_custom-mcp-[0-9]{1,40}-" + ours, uri))
+        """Any https callback, or http to this computer. Any AI app may ask; the owner still signs in
+        and approves each one, and the consent page warns when it isn't Claude, ChatGPT or Gemini."""
+        if uri in self.config.test_redirects:
+            return True
+        if len(uri) > 512 or not uri.isprintable() or " " in uri:
+            return False
+        try:
+            parts = urlsplit(uri)
+            parts.port
+        except ValueError:
+            return False
+        # RFC 6749 §3.1.2: no fragment. A user@ part would only disguise the real host.
+        if parts.fragment or "@" in parts.netloc or not parts.hostname:
+            return False
+        return parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in LOOPBACK_HOSTS)
 
     async def get_client(self, client_id):
         if len(client_id) > 128:
@@ -76,7 +82,7 @@ class Provider:
             raise RegistrationError("invalid_client_metadata", "Use public-client PKCE (none)")
         uris = [u for u in client_info.redirect_uris or [] if not str(u).startswith(GEMINI_UNUSED)]
         if not 1 <= len(uris) <= 6 or not all(self.valid_redirect(str(u)) for u in uris):
-            raise RegistrationError("invalid_redirect_uri", "Only Gemini, Claude and ChatGPT callbacks are allowed")
+            raise RegistrationError("invalid_redirect_uri", "Callbacks must use https, or http to localhost")
         client_info.redirect_uris = uris
         if (set(client_info.grant_types) - {"authorization_code", "refresh_token"}
                 or set(client_info.response_types) != {"code"}

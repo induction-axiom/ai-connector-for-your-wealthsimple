@@ -134,6 +134,7 @@ h2 { margin: 0 0 8px; font-size: 24px; line-height: 1.16; letter-spacing: -.02em
 /* ---------- Panels, tiles ---------- */
 .panel { margin: 0 auto 28px; padding: 40px; border-radius: 28px; background: var(--surface); }
 .panel-note { margin: 0 0 24px; color: var(--muted); font-size: 15px; line-height: 1.5; }
+.panel-note.warning { color: var(--amber); }
 .panel.connect { max-width: 520px; text-align: center; scroll-margin-top: 80px; }
 .panel.connect form { text-align: left; }
 .panel.split { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; }
