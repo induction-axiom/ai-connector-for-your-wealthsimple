@@ -289,6 +289,12 @@ class OAuthTests(unittest.TestCase):
         self.assertEqual(r.status_code, 400)
         self.assertEqual(self.client.post("/register", content=b"x"*20000).status_code, 413)
 
+    def test_consent_shows_when_the_app_registered(self):
+        response = self.begin()
+        ticket = parse_qs(urlsplit(response.headers["location"]).fragment)["request"][0]
+        view = self.client.post("/consent/start", headers={"Origin": BASE}, json={"request": ticket}).json()
+        self.assertAlmostEqual(view["registered_at"], time.time(), delta=60)
+
 
 if __name__ == "__main__":
     unittest.main()

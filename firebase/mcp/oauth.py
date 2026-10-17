@@ -131,7 +131,10 @@ class Provider:
                     "scope": self.config.scope, "csrf": csrf}
             return view, {record: updated}
 
-        return await self.transaction([record], change), browser
+        view = await self.transaction([record], change)
+        # The consent page shows when the app registered: a fresh one is the owner's own.
+        client = await self.get(key("client", view["client_id"]))
+        return {**view, "registered_at": (client or {}).get("created_at")}, browser
 
     async def finish_consent(self, ticket, browser, csrf, owner, approve=True):
         record = key("pending", ticket)

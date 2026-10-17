@@ -34,6 +34,10 @@ try {
   el("scope").textContent = "Read your accounts, holdings and activity, and ask for fresh data from Wealthsimple. " +
     "It can't trade, move money, or see your Wealthsimple password. It stays connected while you use it; " +
     "after 3 months unused, it asks you again.";
+  el("registered").textContent = view.registered_at
+    ? new Intl.RelativeTimeFormat(undefined, {numeric: "auto"}).format(
+        -Math.max(0, Math.round((Date.now() / 1000 - view.registered_at) / 60)), "minute")
+    : "Unknown";
   el("callback").textContent = host;
   el("client").textContent = view.redirect_uri;
   auth = getAuth(initializeApp(config));
