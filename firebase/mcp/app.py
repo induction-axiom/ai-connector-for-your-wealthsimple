@@ -66,6 +66,9 @@ REFRESH_DECISIONS = {
 
 RATE_LIMITS = {"/register": 12, "/authorize": 30, "/consent/start": 30, "/consent/finish": 30,
                "/token": 60, "/owner/status": 60, "/owner/refresh": 15, "/owner/reconnect": 10,
+               # Waiting for an approval in the Wealthsimple app checks every few seconds; the
+               # password goes to Wealthsimple again only once the owner's device approved it.
+               "/owner/reconnect/approval": 30, "/owner/reconnect/resend": 5,
                "/owner/preview": 30, "/owner/apps/disconnect": 10,
                "/owner/signout": 5}
 MAX_QUERY_BYTES = 4096
@@ -517,7 +520,17 @@ def create_app(config, store, owner_verifier, portfolio_reader, cloud_functions,
         # The private reconnect function validates these; credentials are never logged or stored.
         return JSONResponse(await anyio.to_thread.run_sync(
             cloud_functions.reconnect, body.get("username"), body.get("password"),
-            body.get("otp") or None, body.get("approved") is True))
+            body.get("otp") or None))
+
+    @owner_endpoint
+    async def owner_reconnect_approval(body):
+        """Whether the owner approved this sign-in in the Wealthsimple app; signs in once so."""
+        return JSONResponse(await anyio.to_thread.run_sync(
+            cloud_functions.reconnect, body.get("username"), body.get("password"), None, True))
+
+    @owner_endpoint
+    async def owner_reconnect_resend(body):
+        return JSONResponse(await anyio.to_thread.run_sync(cloud_functions.resend_login_challenge))
 
     @owner_endpoint
     async def owner_signout(body):
@@ -564,6 +577,8 @@ def create_app(config, store, owner_verifier, portfolio_reader, cloud_functions,
         Route("/owner/status", owner_status, methods=["POST"]),
         Route("/owner/refresh", owner_refresh, methods=["POST"]),
         Route("/owner/reconnect", owner_reconnect, methods=["POST"]),
+        Route("/owner/reconnect/approval", owner_reconnect_approval, methods=["POST"]),
+        Route("/owner/reconnect/resend", owner_reconnect_resend, methods=["POST"]),
         Route("/owner/preview", owner_preview, methods=["POST"]),
         Route("/owner/signout", owner_signout, methods=["POST"]),
         Route("/owner/apps/disconnect", owner_disconnect_app, methods=["POST"]),

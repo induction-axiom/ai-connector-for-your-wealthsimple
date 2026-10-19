@@ -54,6 +54,9 @@ class FakeCloudFunctions:
     def sign_out(self):
         self.calls.append("sign_out")
         return {"result": "signed_out"}
+    def resend_login_challenge(self):
+        self.calls.append("resend_login_challenge")
+        return {"result": "login_challenge_resent"}
     def reconnect(self, username, password, otp=None, approved=False):
         self.calls.append(("reconnect", username, password, otp) + (("approved",) if approved else ()))
         return {"result": "reconnect_succeeded"}

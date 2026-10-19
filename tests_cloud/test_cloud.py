@@ -255,7 +255,8 @@ class CloudTests(unittest.TestCase):
                 session.client_id, session.session_id, session.wssdi = "c", "s1", "d1"
 
             reader.bootstrap_session.side_effect = bootstrap
-            reader.login_challenge_status.return_value = statuses[len(readers) - 2]
+            if len(readers) > 1:
+                reader.login_challenge_status.return_value = statuses[len(readers) - 2]
             if len(readers) == 1:
                 reader.reconnect_session.side_effect = ws.LoginChallengeRequired("challenge-123")
             else:
@@ -299,6 +300,19 @@ class CloudTests(unittest.TestCase):
                 save.assert_not_called()
                 self.assertIsNone(
                     self.db.rows["connectors/wealthsimple"]["session"]["pending_device"])
+
+    def test_the_approval_request_is_resent_from_the_pending_device(self):
+        with self.assertRaisesRegex(ws.PortfolioError, "login_challenge_expired"):
+            app.service.resend_login_challenge()
+        self.approve_in_app()  # leaves a challenge pending
+        reader = Mock()
+        with patch.object(service_module, "WealthsimpleReader", return_value=reader) as make:
+            self.assertEqual(app.service.resend_login_challenge(),
+                             {"result": "login_challenge_resent"})
+        reader.resend_login_challenge.assert_called_once_with("challenge-123")
+        session = make.call_args.args[0]
+        self.assertEqual((session.session_id, session.wssdi, session.access_token),
+                         ("s1", "d1", None))
 
     def test_an_approval_with_nothing_pending_has_expired(self):
         with patch.object(app.service, "_load_session",
@@ -852,6 +866,23 @@ class ClientTests(unittest.TestCase):
             response({'access_token': 'app-token'}), response({}, 401)]
         with self.assertRaisesRegex(ws.PortfolioError, '^login_challenge_http_failed$'):
             self.reader.login_challenge_status('challenge-123')
+
+    def test_resending_the_approval_request_sends_no_credentials(self):
+        self.reader.http.request.side_effect = [
+            response({'access_token': 'app-token'}), response({})]
+        self.reader.resend_login_challenge('challenge-123')
+        token, resend = (call.kwargs for call in self.reader.http.request.call_args_list)
+        self.assertEqual(token['json']['grant_type'], 'client_credentials')
+        self.assertEqual((resend['method'], resend['url']),
+                         ('POST', ws.LOGIN_CHALLENGE_URL + '/resend'))
+        self.assertEqual(resend['headers']['x-wealthsimple-login-challenge-id'], 'challenge-123')
+        self.assertNotIn('json', resend)
+        request = Mock(method='POST', get_json=Mock(return_value={'resend_login_challenge': True}))
+        with patch.object(app.service, 'resend_login_challenge',
+                          return_value={'result': 'login_challenge_resent'}) as resend_call:
+            result = json.loads(app.reconnect_now(request).get_data())
+        self.assertEqual(result, {'result': 'login_challenge_resent'})
+        resend_call.assert_called_once_with()
 
     def test_reconnect_function_keeps_the_challenge_id_server_side(self):
         request = Mock(method='POST', get_json=Mock(return_value={

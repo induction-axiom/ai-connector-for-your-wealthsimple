@@ -375,6 +375,17 @@ class WealthsimpleReader:
         """pending, approved, denied, expired or unknown: whether the owner has answered the
         Wealthsimple app's sign-in request for this device. Asked, as Wealthsimple's web app
         asks, with an app-only token, so no credentials are sent while waiting."""
+        response = self._challenge_request("GET", LOGIN_CHALLENGE_URL, challenge_id)
+        self._check_challenge_status(response, "login_challenge")
+        status = self._json(response).get("status")
+        return status if status in CHALLENGE_STATUSES else "unknown"
+
+    def resend_login_challenge(self, challenge_id):
+        """Ask Wealthsimple to notify the trusted device again, for one missed or dismissed."""
+        response = self._challenge_request("POST", LOGIN_CHALLENGE_URL + "/resend", challenge_id)
+        self._check_challenge_status(response, "login_challenge_resend")
+
+    def _challenge_request(self, method, url, challenge_id):
         device = {
             "x-wealthsimple-client": "@wealthsimple/wealthsimple",
             "x-ws-session-id": self.session.session_id,
@@ -391,15 +402,12 @@ class WealthsimpleReader:
         token = self._json(response).get("access_token")
         if not isinstance(token, str) or not token:
             raise PortfolioError("login_challenge_token_invalid")
-        response = self._request(
-            method="GET", url=LOGIN_CHALLENGE_URL,
+        return self._request(
+            method=method, url=url,
             headers={"Authorization": "Bearer " + token,
                      "x-wealthsimple-login-challenge-id": challenge_id, **device},
             timeout=20, allow_redirects=False, verify=True,
         )
-        self._check_challenge_status(response, "login_challenge")
-        status = self._json(response).get("status")
-        return status if status in CHALLENGE_STATUSES else "unknown"
 
     def _check_challenge_status(self, response, kind):
         # A 401 here is about the app token or the challenge, not an expired sign-in.

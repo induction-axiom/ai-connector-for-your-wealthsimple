@@ -116,6 +116,8 @@ def reconnect_now(request):
     try:
         if body.get("sign_out") is True:
             return _json_response(service.sign_out())
+        if body.get("resend_login_challenge") is True:
+            return _json_response(service.resend_login_challenge())
         return _json_response(service.reconnect(
             body.get("username"), body.get("password"), body.get("otp"),
             approved=body.get("approved") is True))

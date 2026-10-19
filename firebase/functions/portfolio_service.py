@@ -344,6 +344,17 @@ class PortfolioService:
                 self._save_session(lease_id, signed_in)
         return {"result": "reconnect_succeeded"}
 
+    def resend_login_challenge(self):
+        """Have Wealthsimple notify the trusted device again about the pending sign-in.
+
+        No lease: it changes nothing here, and the page keeps checking the approval meanwhile."""
+        pending, challenge_id = self._pending_device() or (None, None)
+        if not challenge_id:
+            raise PortfolioError("login_challenge_expired")
+        with closing(WealthsimpleReader(pending)) as reader:
+            reader.resend_login_challenge(challenge_id)
+        return {"result": "login_challenge_resent"}
+
     def _remember_device(self, lease_id, session, challenge_id=None):
         """Keep the device Wealthsimple just asked about, without tokens, for its answer."""
         self._update_session_state(lease_id, {"pending_device": {

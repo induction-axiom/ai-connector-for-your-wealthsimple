@@ -480,11 +480,20 @@ class RealAuthorizationTests(unittest.TestCase):
             "username": "owner@example.com", "password": "synthetic-password",
             "otp": "123456"}, headers=headers)
         self.assertEqual(reconnected.json(), {"result": "reconnect_succeeded"})
+        # Only the approval endpoint asks for an approval; the sign-in one never does.
         self.client.post("/owner/reconnect", json={
             "username": "owner@example.com", "password": "synthetic-password",
-            "otp": None, "approved": True}, headers=headers)
+            "approved": True}, headers=headers)
+        self.assertEqual(self.refresher.calls[-1], (
+            "reconnect", "owner@example.com", "synthetic-password", None))
+        self.client.post("/owner/reconnect/approval", json={
+            "username": "owner@example.com", "password": "synthetic-password",
+            "otp": "123456"}, headers=headers)
         self.assertEqual(self.refresher.calls[-1], (
             "reconnect", "owner@example.com", "synthetic-password", None, "approved"))
+        resent = self.client.post("/owner/reconnect/resend", json={}, headers=headers)
+        self.assertEqual(resent.json(), {"result": "login_challenge_resent"})
+        self.assertEqual(self.refresher.calls[-1], "resend_login_challenge")
         signed_out =self.client.post("/owner/signout", json={}, headers=headers)
         self.assertEqual(signed_out.json(), {"result": "signed_out"})
         self.assertNotIn("synthetic-password", reconnected.text)

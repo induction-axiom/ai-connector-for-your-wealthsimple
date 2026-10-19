@@ -139,17 +139,20 @@ const CONNECT_COPY = {
   rate_limited_stop: "Wealthsimple is limiting sign-in attempts. Wait a few minutes and try again.",
   sync_already_running: "A sync is running. Try again when it finishes.",
   reconnect_input_invalid: "Check the email, password and code.",
-  login_challenge_pending: "Wealthsimple hasn't seen an approval yet. Approve the sign-in in the Wealthsimple app, then press I approved it.",
   login_challenge_denied: "The sign-in was denied in the Wealthsimple app. Sign in again to start over.",
   login_challenge_expired: "The approval request expired. Sign in again to start over.",
   login_challenge_failed: "Wealthsimple couldn't confirm the approval. Sign in again to start over.",
 };
 
-// After the code, Wealthsimple may ask for this new device to be approved in its app. The email
-// and password stay in the form, so the sign-in can be sent again once it is approved.
+// After the code, Wealthsimple may ask for this new device to be approved in its app. The page
+// then asks every few seconds whether it was; each ask sends nothing to Wealthsimple but the
+// approval's status check, and the email and password stay in the form for the sign-in after.
+const APPROVAL_CHECK_MS = 3000;
+// As long as Wealthsimple's own web app makes its owner wait before sending another.
+const RESEND_COOLDOWN_S = 30;
+const AWAITING_APPROVAL = new Set(["login_challenge_required", "login_challenge_pending"]);
 const APPROVAL_ENDS = new Set(["login_challenge_denied", "login_challenge_expired",
   "login_challenge_failed"]);
-let awaitingApproval = false;
 
 // ---------- Views and routing ----------
 
@@ -400,8 +403,8 @@ function setConnectMode(mode) {
 }
 
 function resetConnectForm() {
-  awaitingApproval = false;
   el("connect-form").reset();
+  el("resend-approval").classList.add("hidden");
   el("credential-fields").classList.remove("hidden");
   el("otp-field").classList.add("hidden");
   el("otp").required = false;
@@ -455,19 +458,16 @@ el("connect-form").onsubmit = async event => {
   let syncNext = false;
   say("message", "Signing in to Wealthsimple…");
   try {
-    const reply = await api("/owner/reconnect", {username: el("username").value,
-      password: el("password").value,
-      ...(awaitingApproval ? {otp: null, approved: true} : {otp: el("otp").value || null})});
+    const credentials = () => ({username: el("username").value, password: el("password").value});
+    let reply = await api("/owner/reconnect", {...credentials(), otp: el("otp").value || null});
+    while (AWAITING_APPROVAL.has(reply.result)) {
+      if (reply.result === "login_challenge_required") showApprovalStep();
+      await new Promise(resolve => setTimeout(resolve, APPROVAL_CHECK_MS));
+      reply = await api("/owner/reconnect/approval", credentials());
+    }
+    el("resend-approval").classList.add("hidden");
     const result = reply.result;
-    if (result === "login_challenge_required") {
-      awaitingApproval = true;
-      el("credential-fields").classList.add("hidden");
-      el("otp-field").classList.add("hidden");
-      el("otp").required = false;
-      el("otp").value = "";
-      el("connect-submit").textContent = "I approved it";
-      say("message", "Open the Wealthsimple app and approve this sign-in. Wealthsimple sees it coming from your deployment's server, so the location may not be yours. Then press I approved it.");
-    } else if (result === "mfa_required") {
+    if (result === "mfa_required") {
       el("otp-hint").textContent = otpHint(reply);
       el("credential-fields").classList.add("hidden");
       el("otp-field").classList.remove("hidden");
@@ -494,6 +494,37 @@ el("connect-form").onsubmit = async event => {
   // reconnect the saved data stopped updating while signed out. The controls stay disabled
   // from sign-in through the sync, which shows its progress and releases them once at the end.
   if (syncNext) await sync(["portfolio", "activities"]);
+};
+
+function showApprovalStep() {
+  el("credential-fields").classList.add("hidden");
+  el("otp-field").classList.add("hidden");
+  el("otp").required = false;
+  el("otp").value = "";
+  el("connect-submit").textContent = "Waiting for approval…";
+  el("resend-approval").classList.remove("hidden");
+  el("resend-approval").disabled = false;
+  el("resend-approval").textContent = "Resend notification";
+  say("message", "Wealthsimple sent a sign-in request to your trusted device. Open that notification and tap Yes; this page continues on its own. Wealthsimple sees the sign-in coming from your deployment's server, so the location may not be yours.");
+}
+
+el("resend-approval").onclick = async () => {
+  const button = el("resend-approval");
+  button.disabled = true;
+  try {
+    const {result} = await api("/owner/reconnect/resend", {});
+    if (result !== "login_challenge_resent") throw new Error(result);
+    say("message", "Notification sent again. Open it on your trusted device and tap Yes.");
+  } catch (error) {
+    if (error instanceof OwnerSessionExpired) return expireSession();
+    say("message", "Couldn't send the notification again. Wait a moment and try again.", "danger");
+  }
+  for (let left = RESEND_COOLDOWN_S; left > 0 && !button.classList.contains("hidden"); left--) {
+    button.textContent = `Resend notification (${left}s)`;
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  button.textContent = "Resend notification";
+  button.disabled = false;
 };
 
 // ---------- AI apps ----------

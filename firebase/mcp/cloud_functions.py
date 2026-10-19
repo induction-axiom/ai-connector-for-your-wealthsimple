@@ -41,6 +41,12 @@ class CloudFunctions:
         except Exception:
             return {"result": "sign_out_failed"}
 
+    def resend_login_challenge(self):
+        try:
+            return self._post(self.reconnect_url, {"resend_login_challenge": True}, 55)
+        except Exception:
+            return {"result": "reconnect_failed"}
+
     def reconnect(self, username, password, otp=None, approved=False):
         try:
             return self._post(self.reconnect_url,
