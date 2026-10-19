@@ -255,6 +255,9 @@ class WealthsimpleReader:
         self.session.access_token = body["access_token"]
         self.session.refresh_token = body["refresh_token"]
         self.session.token_info = None
+        # Checked before the caller saves it: a token with more than read access is never kept,
+        # even though the spent refresh token means signing in again.
+        self._identity_id()
         return self.session
 
     def reconnect_session(self, username, password, otp=None) -> Session:

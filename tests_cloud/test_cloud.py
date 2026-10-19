@@ -161,6 +161,20 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(state["keep_alive"]["error_code"], "refresh_failed_reauth_may_be_required")
         self.assertNotIn("portfolio", state)  # the saved portfolio did not fail
 
+    def test_keep_alive_never_saves_a_token_with_more_than_read_access(self):
+        reader = Mock()
+        reader.refresh_session.side_effect = ws.PortfolioError("granted_scopes_differ_from_request")
+        with patch.object(app.service, "_load_session", return_value=self.session()), \
+                patch.object(app.service, "_save_session") as save, \
+                patch.object(service_module, "WealthsimpleReader", return_value=reader):
+            with self.assertRaises(ws.PortfolioError):
+                app.service.keep_session_alive()
+        save.assert_not_called()
+        state = self.db.rows["connectors/wealthsimple"]
+        self.assertEqual(state["keep_alive"]["error_code"], "granted_scopes_differ_from_request")
+        self.assertEqual(service_module.connection_state(state, app.service._now()),
+                         "reconnect_required")
+
     def test_first_reconnect_bootstraps_an_empty_cloud_secret(self):
         reader = Mock()
         reader.bootstrap_session.return_value = self.session()
@@ -647,12 +661,26 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(self.reader.http.request.call_count, 1)
 
     def test_refresh_rotates_in_memory_without_password(self):
-        self.reader.http.request.return_value = response({'access_token':'new-a', 'refresh_token':'new-r'})
+        self.reader.http.request.side_effect = [
+            response({'access_token': 'new-a', 'refresh_token': 'new-r'}),
+            response({'scope': 'invest.read trade.read', 'identity_canonical_id': 'identity'}),
+        ]
         session = self.reader.refresh_session()
         self.assertEqual(session.refresh_token, 'new-r')
-        req = self.reader.http.request.call_args.kwargs
+        req = self.reader.http.request.call_args_list[0].kwargs
         self.assertNotIn('Authorization', req['headers'])
         self.assertNotIn('password', req['json'])
+
+    def test_refresh_refuses_a_token_with_more_than_read_access(self):
+        self.reader.http.request.side_effect = [
+            response({'access_token': 'new-a', 'refresh_token': 'new-r'}),
+            response({'scope': 'invest.read trade.read trade.write',
+                      'identity_canonical_id': 'identity'}),
+        ]
+        with self.assertRaisesRegex(ws.PortfolioError, 'granted_scopes_differ_from_request'):
+            self.reader.refresh_session()
+        info = self.reader.http.request.call_args_list[1].kwargs
+        self.assertEqual(info['headers']['Authorization'], 'Bearer new-a')
 
     def test_reconnect_uses_fixed_password_grant_and_validates_scopes(self):
         self.reader.http.request.side_effect = [
