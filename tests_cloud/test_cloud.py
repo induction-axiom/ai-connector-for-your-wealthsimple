@@ -703,6 +703,21 @@ class ClientTests(unittest.TestCase):
             self.reader.reconnect_session('owner@example.com', 'synthetic-password')
         self.assertIsNone(raised.exception.method)
 
+    def test_a_rejected_code_is_logged_without_credentials_or_upstream_text(self):
+        rejected = response({'error': 'invalid_grant', 'error_description': 'PRIVATE'}, 401)
+        rejected.headers = {'x-wealthsimple-otp': 'required; method=sms; digits=1234'}
+        rejected.cookies = {'wssdi': 'device-secret', '__cf_bm': 'x'}
+        self.reader.http.request.return_value = rejected
+        with self.assertLogs(level='WARNING') as logs, \
+                self.assertRaisesRegex(ws.PortfolioError, 'login_rejected'):
+            self.reader.reconnect_session('owner@example.com', 'synthetic-password', '654321')
+        line = logs.output[0]
+        self.assertIn('outcome=login_rejected status=401 error=invalid_grant otp_sent=True', line)
+        self.assertIn('challenge=True method=sms cookies=__cf_bm,wssdi', line)
+        for secret in ('owner@example.com', 'synthetic-password', '654321', 'PRIVATE',
+                       'device-secret', '1234'):
+            self.assertNotIn(secret, line)
+
     def test_reconnect_says_where_the_code_was_sent(self):
         challenge = response({'error': 'invalid_grant'}, 401)
         challenge.headers = {'x-wealthsimple-otp': 'required; method=sms; digits=1234'}

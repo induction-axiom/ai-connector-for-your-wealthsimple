@@ -8,6 +8,7 @@ locking and session persistence deliberately live outside this module.
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
+import logging
 import re
 import time
 from pathlib import Path
@@ -60,6 +61,33 @@ def otp_challenge(header):
         return MfaRequired()
     hint = fields.get("digits") if method in {"sms", "recovery_sms"} else None
     return MfaRequired(method, hint if hint and re.fullmatch(r"\d{2,4}", hint) else None)
+
+
+# Standard OAuth error types; anything else Wealthsimple sends is logged as "other".
+OAUTH_ERRORS = frozenset({"invalid_grant", "invalid_request", "invalid_client",
+                          "unauthorized_client", "unsupported_grant_type", "invalid_scope",
+                          "access_denied"})
+
+
+def log_sign_in(outcome, response, body, otp_sent):
+    """Why a sign-in step ended as it did, without credentials, tokens or upstream text."""
+    error = body.get("error")
+    try:
+        cookies = sorted(name for name in response.cookies.keys()
+                         if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", name))
+    except Exception:
+        cookies = []
+    try:
+        challenge = response.headers.get("x-wealthsimple-otp")
+    except Exception:
+        challenge = None
+    challenge = challenge if isinstance(challenge, str) else None
+    logging.warning(
+        "sign_in outcome=%s status=%s error=%s otp_sent=%s challenge=%s method=%s cookies=%s",
+        outcome, response.status_code,
+        error if error in OAUTH_ERRORS else ("other" if error else None),
+        otp_sent, challenge is not None,
+        otp_challenge(challenge).method if challenge else None, ",".join(cookies))
 
 
 class AccessTokenExpired(PortfolioError):
@@ -296,7 +324,9 @@ class WealthsimpleReader:
         body = self._json(response)
         if response.status_code != 200 or body.get("error"):
             if otp is None and body.get("error") == "invalid_grant":
+                log_sign_in("mfa_required", response, body, otp_sent=False)
                 raise otp_challenge(response.headers.get("x-wealthsimple-otp"))
+            log_sign_in("login_rejected", response, body, otp_sent=bool(otp))
             raise PortfolioError("login_rejected")
         if (not isinstance(body.get("access_token"), str) or not body["access_token"]
                 or not isinstance(body.get("refresh_token"), str)
