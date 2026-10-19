@@ -42,7 +42,7 @@ function status(connection) {
 // Serve the dashboard; each /owner/refresh waits until the test settles it. Sign-in replies
 // with each of `challenges` first, then succeeds.
 async function openConsole(page, extra = {}, challenges = [], email = OWNER) {
-  const state = {connection: "reconnect_required", refreshes: [], errors: []};
+  const state = {connection: "reconnect_required", refreshes: [], errors: [], reconnects: []};
   page.on("pageerror", error => state.errors.push(error.message));
   await page.route("**/*", async route => {
     const url = new URL(route.request().url());
@@ -65,6 +65,7 @@ async function openConsole(page, extra = {}, challenges = [], email = OWNER) {
     });
     if (url.pathname === "/owner/status") return json({...status(state.connection), ...extra});
     if (url.pathname === "/owner/reconnect") {
+      state.reconnects.push(route.request().postDataJSON());
       if (challenges.length) return json(challenges.shift());
       state.connection = "connected";
       return json({result: "reconnect_succeeded"});
@@ -122,6 +123,51 @@ test("the code prompt names where Wealthsimple sent the code", async ({page}) =>
   await expect(page.locator("#otp-hint")).toHaveText(
     "Enter the code Wealthsimple texted to the number ending in 1234.");
   await expect(page.locator("#credential-fields")).toBeHidden();
+  expect(state.errors).toEqual([]);
+});
+
+test("a sign-in waiting for approval in the Wealthsimple app is sent again once approved", async ({page}) => {
+  const state = await openConsole(page, {}, [
+    {result: "mfa_required", method: "app", hint: null},
+    {result: "login_challenge_required"},
+    {result: "login_challenge_pending"}]);
+  await reconnect(page);
+  await page.fill("#otp", "123456");
+  await page.click("#connect-submit");
+
+  await expect(page.locator("#connect-submit")).toHaveText("I approved it");
+  await expect(page.locator("#credential-fields")).toBeHidden();
+  await expect(page.locator("#otp-field")).toBeHidden();
+  await expect(page.locator("#message")).toContainText("approve this sign-in");
+
+  await page.click("#connect-submit");
+  await expect(page.locator("#message")).toContainText("hasn't seen an approval yet");
+  await expect(page.locator("#connect-submit")).toHaveText("I approved it");
+
+  await page.click("#connect-submit");
+  (await nextRefresh(state, "portfolio")).reply("refresh_succeeded");
+  const [first, code, ...approvals] = state.reconnects;
+  expect(first).toMatchObject({otp: null});
+  expect(code).toMatchObject({otp: "123456"});
+  expect(code.approved).toBeUndefined();
+  for (const approval of approvals)
+    expect(approval).toEqual({username: "owner@example.com", password: "synthetic-password",
+      otp: null, approved: true});
+  expect(state.errors).toEqual([]);
+});
+
+test("a denied approval starts the sign-in over", async ({page}) => {
+  const state = await openConsole(page, {}, [
+    {result: "login_challenge_required"}, {result: "login_challenge_denied"}]);
+  await reconnect(page);
+  await page.click("#connect-submit");
+  await expect(page.locator("#message")).toHaveText(
+    "The sign-in was denied in the Wealthsimple app. Sign in again to start over.");
+  await expect(page.locator("#credential-fields")).toBeVisible();
+  await expect(page.locator("#connect-submit")).toHaveText("Continue");
+  await reconnect(page);
+  await expect.poll(() => state.reconnects.length).toBe(3);
+  expect(state.reconnects.at(-1).approved).toBeUndefined();
   expect(state.errors).toEqual([]);
 });
 

@@ -480,7 +480,12 @@ class RealAuthorizationTests(unittest.TestCase):
             "username": "owner@example.com", "password": "synthetic-password",
             "otp": "123456"}, headers=headers)
         self.assertEqual(reconnected.json(), {"result": "reconnect_succeeded"})
-        signed_out = self.client.post("/owner/signout", json={}, headers=headers)
+        self.client.post("/owner/reconnect", json={
+            "username": "owner@example.com", "password": "synthetic-password",
+            "otp": None, "approved": True}, headers=headers)
+        self.assertEqual(self.refresher.calls[-1], (
+            "reconnect", "owner@example.com", "synthetic-password", None, "approved"))
+        signed_out =self.client.post("/owner/signout", json={}, headers=headers)
         self.assertEqual(signed_out.json(), {"result": "signed_out"})
         self.assertNotIn("synthetic-password", reconnected.text)
         self.assertEqual(self.client.post("/owner/status", json={}, headers={

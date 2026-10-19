@@ -15,6 +15,7 @@ from google.cloud import secretmanager
 
 from wealthsimple_connector.core.client import (
     AccessTokenExpired,
+    LoginChallengeRequired,
     MfaRequired,
     PortfolioError,
     Session,
@@ -37,7 +38,7 @@ BACKFILL_START = "1900-01-01T00:00:00Z"
 # so consecutive questions reuse it. The dashboard's Sync can force a new pass.
 ACTIVITY_FRESH_SECONDS = 600
 MAX_SNAPSHOT_BYTES = 800_000
-# How long the device a sign-in code was sent to is kept for the code to be entered from.
+# How long the device Wealthsimple sent a code or an app request to is kept for the answer.
 PENDING_DEVICE_SECONDS = 600
 # Firestore allows 500 writes per transaction; one more is the connector state.
 LEASED_WRITES_PER_COMMIT = 400
@@ -287,12 +288,17 @@ class PortfolioService:
             except Exception:
                 pass
 
-    def reconnect(self, username, password, otp=None):
-        """Replace the cloud session; credentials are never persisted."""
+    def reconnect(self, username, password, otp=None, approved=False):
+        """Replace the cloud session; credentials are never persisted.
+
+        approved: the owner says they approved this device in the Wealthsimple app. Its
+        answer is checked first, so the password goes to Wealthsimple again only once it is
+        yes."""
         if (not isinstance(username, str) or not 3 <= len(username) <= 254
                 or not isinstance(password, str) or not 1 <= len(password) <= 1024
                 or (otp is not None and (not isinstance(otp, str)
-                    or not 4 <= len(otp) <= 20))):
+                    or not 4 <= len(otp) <= 20))
+                or not isinstance(approved, bool) or (approved and otp is not None)):
             raise PortfolioError("reconnect_input_invalid")
 
         # A failed sign-in is not a sync failure, so nothing is recorded (no section).
@@ -303,29 +309,54 @@ class PortfolioService:
             except (NotFound, FailedPrecondition):
                 if version_name:
                     raise
-                # First connection, or after signing out: nothing usable, except the device
-                # a code was just sent to. Wealthsimple only accepts the code from that device.
                 stored = False
-                session = self._pending_device() or Session()
+                session = None
+            # Wealthsimple only accepts a code, or an approval, from the device it asked.
+            pending, challenge_id = self._pending_device() or (None, None)
+            if approved:
+                if not challenge_id:
+                    raise PortfolioError("login_challenge_expired")
+                session = pending
+            elif session is None:
+                # First connection, or after signing out: nothing usable but a pending device.
+                session = pending or Session()
             with closing(WealthsimpleReader(session)) as reader:
                 if not session.client_id or not session.session_id or not session.wssdi:
                     reader.bootstrap_session()
+                if approved:
+                    status = reader.login_challenge_status(challenge_id)
+                    if status == "pending":
+                        raise PortfolioError("login_challenge_pending")
+                    if status != "approved":
+                        self._update_session_state(lease_id, {"pending_device": None})
+                        raise PortfolioError("login_challenge_" + (
+                            status if status in {"denied", "expired"} else "failed"))
                 try:
-                    signed_in = reader.reconnect_session(username, password, otp)
+                    signed_in = reader.reconnect_session(
+                        username, password, otp, challenge_id if approved else None)
+                except LoginChallengeRequired as challenge:
+                    self._remember_device(lease_id, session, challenge.challenge_id)
+                    raise
                 except MfaRequired:
                     if not stored:
-                        self._update_session_state(lease_id, {"pending_device": {
-                            "client_id": session.client_id,
-                            "session_id": session.session_id,
-                            "wssdi": session.wssdi,
-                            "created_at": self._now(),
-                        }})
+                        self._remember_device(lease_id, session)
                     raise
                 self._save_session(lease_id, signed_in)
         return {"result": "reconnect_succeeded"}
 
+    def _remember_device(self, lease_id, session, challenge_id=None):
+        """Keep the device Wealthsimple just asked about, without tokens, for its answer."""
+        self._update_session_state(lease_id, {"pending_device": {
+            "client_id": session.client_id,
+            "session_id": session.session_id,
+            "wssdi": session.wssdi,
+            "login_challenge_id": challenge_id,
+            "created_at": self._now(),
+        }})
+
     def _pending_device(self):
-        """The device a sign-in code was sent to in the last few minutes, without tokens."""
+        """(session, login challenge ID or None) for the device Wealthsimple asked about in the
+        last few minutes, or None."""
         state = self._connector_ref(self._db()).get().to_dict() or {}
         device = (state.get("session") or {}).get("pending_device") or {}
         created_at = device.get("created_at")
@@ -334,8 +365,10 @@ class PortfolioService:
                 or not all(isinstance(device.get(name), str) and device[name]
                            for name in ("client_id", "session_id", "wssdi"))):
             return None
-        return Session(client_id=device["client_id"], session_id=device["session_id"],
-                       wssdi=device["wssdi"])
+        challenge_id = device.get("login_challenge_id")
+        return (Session(client_id=device["client_id"], session_id=device["session_id"],
+                        wssdi=device["wssdi"]),
+                challenge_id if isinstance(challenge_id, str) and challenge_id else None)
 
     def sign_out(self):
         """Forget the Wealthsimple session by destroying every stored copy. Saved data stays."""

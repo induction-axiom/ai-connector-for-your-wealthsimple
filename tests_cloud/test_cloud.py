@@ -135,7 +135,7 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(result, {"result": "reconnect_succeeded"})
         save.assert_called_once()
         reader.reconnect_session.assert_called_once_with(
-            "owner@example.com", "synthetic-password", None)
+            "owner@example.com", "synthetic-password", None, None)
         self.assertIsNone(self.db.rows["connectors/wealthsimple"]["sync"]["lease_id"])
 
     def test_keep_alive_only_rotates_the_session(self):
@@ -202,7 +202,7 @@ class CloudTests(unittest.TestCase):
                 session.session_id = "session-%d" % len(calls)
                 session.wssdi = "device-%d" % len(calls)
 
-            def sign_in(username, password, otp):
+            def sign_in(username, password, otp, login_challenge_id=None):
                 calls.append(((session.client_id, session.session_id, session.wssdi),
                               bool(bootstrapped)))
                 if otp is None:
@@ -240,6 +240,76 @@ class CloudTests(unittest.TestCase):
             first_device_age=timedelta(seconds=service_module.PENDING_DEVICE_SECONDS + 1))
         self.assertTrue(second_bootstrapped)
         self.assertNotEqual(second, first)
+
+    def approve_in_app(self, *statuses):
+        """Sign in with a code, then press "I approved it" once per status the app reports.
+        Returns each reader's session and the readers themselves."""
+        sessions, readers = [], []
+
+        def reader_for(session):
+            reader = Mock()
+            sessions.append(session)
+            readers.append(reader)
+
+            def bootstrap():
+                session.client_id, session.session_id, session.wssdi = "c", "s1", "d1"
+
+            reader.bootstrap_session.side_effect = bootstrap
+            reader.login_challenge_status.return_value = statuses[len(readers) - 2]
+            if len(readers) == 1:
+                reader.reconnect_session.side_effect = ws.LoginChallengeRequired("challenge-123")
+            else:
+                reader.reconnect_session.return_value = self.session()
+            return reader
+
+        results = []
+        with patch.object(app.service, "_load_session",
+                          side_effect=service_module.NotFound("empty secret")), \
+                patch.object(app.service, "_save_session") as save, \
+                patch.object(service_module, "WealthsimpleReader", side_effect=reader_for):
+            with self.assertRaises(ws.LoginChallengeRequired):
+                app.service.reconnect("owner@example.com", "synthetic-password", "123456")
+            for _ in statuses:
+                try:
+                    results.append(app.service.reconnect(
+                        "owner@example.com", "synthetic-password", approved=True))
+                except ws.PortfolioError as error:
+                    results.append(str(error))
+        return results, sessions, readers, save
+
+    def test_an_app_approval_is_checked_before_the_password_is_sent_again(self):
+        results, sessions, readers, save = self.approve_in_app("pending", "approved")
+        self.assertEqual(results, ["login_challenge_pending", {"result": "reconnect_succeeded"}])
+        readers[1].reconnect_session.assert_not_called()
+        readers[2].reconnect_session.assert_called_once_with(
+            "owner@example.com", "synthetic-password", None, "challenge-123")
+        readers[2].login_challenge_status.assert_called_once_with("challenge-123")
+        readers[2].bootstrap_session.assert_not_called()
+        self.assertEqual((sessions[2].session_id, sessions[2].wssdi), ("s1", "d1"))
+        save.assert_called_once()
+
+    def test_a_denied_or_expired_approval_forgets_the_device(self):
+        for status in ("denied", "expired", "surprise"):
+            with self.subTest(status=status):
+                self.db.rows.clear()
+                results, _sessions, readers, save = self.approve_in_app(status)
+                self.assertEqual(results, ["login_challenge_" + (
+                    status if status != "surprise" else "failed")])
+                readers[1].reconnect_session.assert_not_called()
+                save.assert_not_called()
+                self.assertIsNone(
+                    self.db.rows["connectors/wealthsimple"]["session"]["pending_device"])
+
+    def test_an_approval_with_nothing_pending_has_expired(self):
+        with patch.object(app.service, "_load_session",
+                          side_effect=service_module.NotFound("empty secret")), \
+                patch.object(service_module, "WealthsimpleReader") as reader:
+            with self.assertRaisesRegex(ws.PortfolioError, "login_challenge_expired"):
+                app.service.reconnect("owner@example.com", "synthetic-password", approved=True)
+        reader.assert_not_called()
+        with self.assertRaisesRegex(ws.PortfolioError, "reconnect_input_invalid"):
+            app.service.reconnect("owner@example.com", "synthetic-password", "123456",
+                                  approved=True)
 
     def test_a_code_asked_for_on_a_stored_session_keeps_no_pending_device(self):
         reader = Mock()
@@ -737,6 +807,64 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(read('required; method=sms; digits=<b>12</b>'), ('sms', None))
         self.assertEqual(read('required; method=push'), (None, None))
         self.assertEqual(read(None), (None, None))
+
+    def test_a_device_approval_request_raises_the_challenge_without_logging_its_claims(self):
+        self.reader.http.request.return_value = response({
+            'error': 'login_challenge_required', 'login_challenge_id': 'challenge-123',
+            'purpose': 'login', 'trusted_device_recovery_claim': 'PRIVATE-CLAIM'}, 401)
+        with self.assertLogs(level='WARNING') as logs, \
+                self.assertRaises(ws.LoginChallengeRequired) as raised:
+            self.reader.reconnect_session('owner@example.com', 'synthetic-password', '123456')
+        self.assertEqual(raised.exception.challenge_id, 'challenge-123')
+        self.assertNotIn('PRIVATE-CLAIM', logs.output[0])
+        self.assertNotIn('challenge-123', logs.output[0])
+        self.reader.http.request.return_value = response(
+            {'error': 'login_challenge_required', 'login_challenge_id': 'bad id!'}, 401)
+        with self.assertLogs(level='WARNING'), \
+                self.assertRaisesRegex(ws.PortfolioError, 'login_challenge_invalid'):
+            self.reader.reconnect_session('owner@example.com', 'synthetic-password', '123456')
+
+    def test_an_approved_sign_in_sends_the_challenge_in_place_of_a_code(self):
+        self.reader.http.request.side_effect = [
+            response({'access_token': 'new-a', 'refresh_token': 'new-r'}),
+            response({'scope': 'invest.read trade.read', 'identity_canonical_id': 'identity'}),
+        ]
+        self.reader.reconnect_session('owner@example.com', 'synthetic-password', None,
+                                      'challenge-123')
+        headers = self.reader.http.request.call_args_list[0].kwargs['headers']
+        self.assertEqual(headers['x-wealthsimple-login-challenge-id'], 'challenge-123')
+        self.assertNotIn('x-wealthsimple-otp', headers)
+
+    def test_the_approval_is_asked_with_an_app_token_and_no_credentials(self):
+        self.reader.http.request.side_effect = [
+            response({'access_token': 'app-token'}), response({'status': 'approved'})]
+        self.assertEqual(self.reader.login_challenge_status('challenge-123'), 'approved')
+        token, status = (call.kwargs for call in self.reader.http.request.call_args_list)
+        self.assertEqual(token['json'], {'grant_type': 'client_credentials', 'scope': 'read',
+                                         'client_id': 'c'})
+        self.assertEqual((status['method'], status['url']), ('GET', ws.LOGIN_CHALLENGE_URL))
+        self.assertEqual(status['headers']['Authorization'], 'Bearer app-token')
+        self.assertEqual(status['headers']['x-wealthsimple-login-challenge-id'], 'challenge-123')
+        self.reader.http.request.side_effect = [
+            response({'access_token': 'app-token'}), response({'status': 'SECRET'})]
+        self.assertEqual(self.reader.login_challenge_status('challenge-123'), 'unknown')
+        self.reader.http.request.side_effect = [
+            response({'access_token': 'app-token'}), response({}, 401)]
+        with self.assertRaisesRegex(ws.PortfolioError, '^login_challenge_http_failed$'):
+            self.reader.login_challenge_status('challenge-123')
+
+    def test_reconnect_function_keeps_the_challenge_id_server_side(self):
+        request = Mock(method='POST', get_json=Mock(return_value={
+            'username': 'owner@example.com', 'password': 'synthetic-password', 'approved': True}))
+        with patch.object(app.service, 'reconnect',
+                          side_effect=ws.LoginChallengeRequired('challenge-123')) as reconnect:
+            result = json.loads(app.reconnect_now(request).get_data())
+        self.assertEqual(result, {'result': 'login_challenge_required'})
+        self.assertIs(reconnect.call_args.kwargs['approved'], True)
+        with patch.object(app.service, 'reconnect',
+                          side_effect=ws.PortfolioError('login_challenge_pending')):
+            result = json.loads(app.reconnect_now(request).get_data())
+        self.assertEqual(result, {'result': 'login_challenge_pending'})
 
     def test_reconnect_function_returns_the_code_method(self):
         request = Mock(method='POST', get_json=Mock(return_value={

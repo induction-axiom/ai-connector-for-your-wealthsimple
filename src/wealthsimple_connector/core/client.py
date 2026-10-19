@@ -20,6 +20,7 @@ from curl_cffi import requests
 
 TOKEN_URL = "https://api.production.wealthsimple.com/v1/oauth/v2/token"
 INFO_URL = TOKEN_URL + "/info"
+LOGIN_CHALLENGE_URL = "https://api.production.wealthsimple.com/v1/login_challenge"
 GRAPHQL_URL = "https://my.wealthsimple.com/graphql"
 LOGIN_URL = "https://my.wealthsimple.com/app/login"
 EXPECTED_SCOPES = frozenset({"invest.read", "trade.read"})
@@ -42,6 +43,18 @@ class MfaRequired(PortfolioError):
         super().__init__("mfa_required")
         self.method = method
         self.hint = hint
+
+
+class LoginChallengeRequired(PortfolioError):
+    """Wealthsimple wants this new device approved in its app before it hands out tokens."""
+
+    def __init__(self, challenge_id):
+        super().__init__("login_challenge_required")
+        self.challenge_id = challenge_id
+
+
+CHALLENGE_ID = re.compile(r"[A-Za-z0-9_.:-]{8,128}")
+CHALLENGE_STATUSES = frozenset({"pending", "approved", "denied", "expired"})
 
 
 # The ways Wealthsimple's web app knows to deliver a code; "app" is an authenticator app.
@@ -296,8 +309,11 @@ class WealthsimpleReader:
         self._identity_id()
         return self.session
 
-    def reconnect_session(self, username, password, otp=None) -> Session:
-        """Replace an expired session using owner-supplied credentials."""
+    def reconnect_session(self, username, password, otp=None, login_challenge_id=None) -> Session:
+        """Replace an expired session using owner-supplied credentials.
+
+        After the owner approves this device in the Wealthsimple app, the same request is sent
+        again with the challenge's ID in place of a code, as Wealthsimple's web app does."""
         headers = {
             "Content-Type": "application/json",
             "x-wealthsimple-client": "@wealthsimple/wealthsimple",
@@ -305,7 +321,9 @@ class WealthsimpleReader:
             "x-ws-session-id": self.session.session_id,
             "x-ws-device-id": self.session.wssdi,
         }
-        if otp:
+        if login_challenge_id:
+            headers["x-wealthsimple-login-challenge-id"] = login_challenge_id
+        elif otp:
             headers["x-wealthsimple-otp"] = otp + ";remember=true"
         response = self._request(
             method="POST",
@@ -331,6 +349,12 @@ class WealthsimpleReader:
 
         body = self._json(response)
         if response.status_code != 200 or body.get("error"):
+            if body.get("error") == "login_challenge_required":
+                log_sign_in("login_challenge_required", response, body, otp_sent=bool(otp))
+                challenge_id = body.get("login_challenge_id")
+                if not isinstance(challenge_id, str) or not CHALLENGE_ID.fullmatch(challenge_id):
+                    raise PortfolioError("login_challenge_invalid")
+                raise LoginChallengeRequired(challenge_id)
             if otp is None and body.get("error") == "invalid_grant":
                 log_sign_in("mfa_required", response, body, otp_sent=False)
                 raise otp_challenge(response.headers.get("x-wealthsimple-otp"))
@@ -346,6 +370,43 @@ class WealthsimpleReader:
         self.session.token_info = None
         self._identity_id()
         return self.session
+
+    def login_challenge_status(self, challenge_id):
+        """pending, approved, denied, expired or unknown: whether the owner has answered the
+        Wealthsimple app's sign-in request for this device. Asked, as Wealthsimple's web app
+        asks, with an app-only token, so no credentials are sent while waiting."""
+        device = {
+            "x-wealthsimple-client": "@wealthsimple/wealthsimple",
+            "x-ws-session-id": self.session.session_id,
+            "x-ws-device-id": self.session.wssdi,
+        }
+        response = self._request(
+            method="POST", url=TOKEN_URL,
+            json={"grant_type": "client_credentials", "scope": "read",
+                  "client_id": self.session.client_id},
+            headers={"Content-Type": "application/json", **device},
+            timeout=20, allow_redirects=False, verify=True,
+        )
+        self._check_challenge_status(response, "login_challenge_token")
+        token = self._json(response).get("access_token")
+        if not isinstance(token, str) or not token:
+            raise PortfolioError("login_challenge_token_invalid")
+        response = self._request(
+            method="GET", url=LOGIN_CHALLENGE_URL,
+            headers={"Authorization": "Bearer " + token,
+                     "x-wealthsimple-login-challenge-id": challenge_id, **device},
+            timeout=20, allow_redirects=False, verify=True,
+        )
+        self._check_challenge_status(response, "login_challenge")
+        status = self._json(response).get("status")
+        return status if status in CHALLENGE_STATUSES else "unknown"
+
+    def _check_challenge_status(self, response, kind):
+        # A 401 here is about the app token or the challenge, not an expired sign-in.
+        try:
+            self._check_status(response, kind)
+        except AccessTokenExpired:
+            raise PortfolioError(kind + "_http_failed") from None
 
     def _request(self, **kwargs):
         remaining = self.deadline - time.monotonic()

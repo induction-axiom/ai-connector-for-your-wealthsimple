@@ -7,7 +7,8 @@ import firebase_admin
 from firebase_functions import https_fn, scheduler_fn
 from firebase_functions.params import StringParam
 
-from portfolio_service import RECONNECT_ERRORS, MfaRequired, PortfolioError, PortfolioService
+from portfolio_service import (RECONNECT_ERRORS, LoginChallengeRequired, MfaRequired,
+                               PortfolioError, PortfolioService)
 
 
 REGION = os.environ.get("CONNECTOR_REGION", "us-east4")
@@ -34,7 +35,9 @@ def _refresh_outcome(code):
 
 
 RECONNECT_OUTCOMES = {"mfa_required", "login_rejected", "rate_limited_stop",
-                      "sync_already_running", "reconnect_input_invalid"}
+                      "sync_already_running", "reconnect_input_invalid",
+                      "login_challenge_pending", "login_challenge_denied",
+                      "login_challenge_expired", "login_challenge_failed"}
 
 
 def _json_response(value, status=200):
@@ -114,7 +117,11 @@ def reconnect_now(request):
         if body.get("sign_out") is True:
             return _json_response(service.sign_out())
         return _json_response(service.reconnect(
-            body.get("username"), body.get("password"), body.get("otp")))
+            body.get("username"), body.get("password"), body.get("otp"),
+            approved=body.get("approved") is True))
+    except LoginChallengeRequired:
+        # The challenge's ID stays server-side, with the device it was issued to.
+        return _json_response({"result": "login_challenge_required"})
     except MfaRequired as error:
         # Where the code went, so the dashboard asks for the right one; null when unknown.
         return _json_response({"result": "mfa_required", "method": error.method,

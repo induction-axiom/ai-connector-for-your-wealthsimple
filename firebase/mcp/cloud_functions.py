@@ -41,9 +41,10 @@ class CloudFunctions:
         except Exception:
             return {"result": "sign_out_failed"}
 
-    def reconnect(self, username, password, otp=None):
+    def reconnect(self, username, password, otp=None, approved=False):
         try:
             return self._post(self.reconnect_url,
-                              {"username": username, "password": password, "otp": otp}, 55)
+                              {"username": username, "password": password, "otp": otp,
+                               **({"approved": True} if approved else {})}, 55)
         except Exception:
             return {"result": "reconnect_failed"}

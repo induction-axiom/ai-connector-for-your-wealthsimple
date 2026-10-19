@@ -139,7 +139,17 @@ const CONNECT_COPY = {
   rate_limited_stop: "Wealthsimple is limiting sign-in attempts. Wait a few minutes and try again.",
   sync_already_running: "A sync is running. Try again when it finishes.",
   reconnect_input_invalid: "Check the email, password and code.",
+  login_challenge_pending: "Wealthsimple hasn't seen an approval yet. Approve the sign-in in the Wealthsimple app, then press I approved it.",
+  login_challenge_denied: "The sign-in was denied in the Wealthsimple app. Sign in again to start over.",
+  login_challenge_expired: "The approval request expired. Sign in again to start over.",
+  login_challenge_failed: "Wealthsimple couldn't confirm the approval. Sign in again to start over.",
 };
+
+// After the code, Wealthsimple may ask for this new device to be approved in its app. The email
+// and password stay in the form, so the sign-in can be sent again once it is approved.
+const APPROVAL_ENDS = new Set(["login_challenge_denied", "login_challenge_expired",
+  "login_challenge_failed"]);
+let awaitingApproval = false;
 
 // ---------- Views and routing ----------
 
@@ -390,6 +400,7 @@ function setConnectMode(mode) {
 }
 
 function resetConnectForm() {
+  awaitingApproval = false;
   el("connect-form").reset();
   el("credential-fields").classList.remove("hidden");
   el("otp-field").classList.add("hidden");
@@ -445,9 +456,18 @@ el("connect-form").onsubmit = async event => {
   say("message", "Signing in to Wealthsimple…");
   try {
     const reply = await api("/owner/reconnect", {username: el("username").value,
-      password: el("password").value, otp: el("otp").value || null});
+      password: el("password").value,
+      ...(awaitingApproval ? {otp: null, approved: true} : {otp: el("otp").value || null})});
     const result = reply.result;
-    if (result === "mfa_required") {
+    if (result === "login_challenge_required") {
+      awaitingApproval = true;
+      el("credential-fields").classList.add("hidden");
+      el("otp-field").classList.add("hidden");
+      el("otp").required = false;
+      el("otp").value = "";
+      el("connect-submit").textContent = "I approved it";
+      say("message", "Open the Wealthsimple app and approve this sign-in. Wealthsimple sees it coming from your deployment's server, so the location may not be yours. Then press I approved it.");
+    } else if (result === "mfa_required") {
       el("otp-hint").textContent = otpHint(reply);
       el("credential-fields").classList.add("hidden");
       el("otp-field").classList.remove("hidden");
@@ -460,7 +480,7 @@ el("connect-form").onsubmit = async event => {
       await loadStatus();
       syncNext = true;
     } else {
-      if (result === "login_rejected") resetConnectForm();
+      if (result === "login_rejected" || APPROVAL_ENDS.has(result)) resetConnectForm();
       say("message", CONNECT_COPY[result] || "Wealthsimple sign-in is unavailable right now.", "danger");
     }
   } catch (error) {

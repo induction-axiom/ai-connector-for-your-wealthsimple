@@ -517,7 +517,7 @@ def create_app(config, store, owner_verifier, portfolio_reader, cloud_functions,
         # The private reconnect function validates these; credentials are never logged or stored.
         return JSONResponse(await anyio.to_thread.run_sync(
             cloud_functions.reconnect, body.get("username"), body.get("password"),
-            body.get("otp") or None))
+            body.get("otp") or None, body.get("approved") is True))
 
     @owner_endpoint
     async def owner_signout(body):
