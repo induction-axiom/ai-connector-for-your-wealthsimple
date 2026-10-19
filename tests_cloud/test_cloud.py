@@ -713,7 +713,8 @@ class ClientTests(unittest.TestCase):
             self.reader.reconnect_session('owner@example.com', 'synthetic-password', '654321')
         line = logs.output[0]
         self.assertIn('outcome=login_rejected status=401 error=invalid_grant otp_sent=True', line)
-        self.assertIn('challenge=True method=sms cookies=__cf_bm,wssdi', line)
+        self.assertIn('method=sms challenge_fields=digits,method,required '
+                      'body_fields=error,error_description cookies=__cf_bm,wssdi', line)
         for secret in ('owner@example.com', 'synthetic-password', '654321', 'PRIVATE',
                        'device-secret', '1234'):
             self.assertNotIn(secret, line)
