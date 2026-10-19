@@ -174,6 +174,69 @@ class CloudTests(unittest.TestCase):
         reader.bootstrap_session.assert_called_once_with()
         save.assert_called_once()
 
+    def sign_in_twice(self, first_device_age=None):
+        """Password, then code, with no stored session. Returns each call's (ids, bootstrapped)."""
+        calls = []
+
+        def reader_for(session):
+            reader = Mock()
+            bootstrapped = []
+
+            def bootstrap():
+                bootstrapped.append(True)
+                session.client_id = "c"
+                session.session_id = "session-%d" % len(calls)
+                session.wssdi = "device-%d" % len(calls)
+
+            def sign_in(username, password, otp):
+                calls.append(((session.client_id, session.session_id, session.wssdi),
+                              bool(bootstrapped)))
+                if otp is None:
+                    raise ws.MfaRequired("sms", "1234")
+                return self.session()
+
+            reader.bootstrap_session.side_effect = bootstrap
+            reader.reconnect_session.side_effect = sign_in
+            return reader
+
+        with patch.object(app.service, "_load_session",
+                          side_effect=service_module.NotFound("empty secret")), \
+                patch.object(app.service, "_save_session") as save, \
+                patch.object(service_module, "WealthsimpleReader", side_effect=reader_for):
+            with self.assertRaises(ws.MfaRequired):
+                app.service.reconnect("owner@example.com", "synthetic-password")
+            if first_device_age is not None:
+                device = self.db.rows["connectors/wealthsimple"]["session"]["pending_device"]
+                device["created_at"] = app.service._now() - first_device_age
+            app.service.reconnect("owner@example.com", "synthetic-password", "123456")
+        save.assert_called_once()
+        return calls
+
+    def test_code_is_entered_from_the_device_it_was_sent_to(self):
+        (first, first_bootstrapped), (second, second_bootstrapped) = self.sign_in_twice()
+        self.assertTrue(first_bootstrapped)
+        self.assertFalse(second_bootstrapped)
+        self.assertEqual(second, first)
+        device = self.db.rows["connectors/wealthsimple"]["session"]["pending_device"]
+        self.assertNotIn("access_token", device)
+        self.assertNotIn("refresh_token", device)
+
+    def test_an_old_pending_device_is_not_reused(self):
+        (first, _), (second, second_bootstrapped) = self.sign_in_twice(
+            first_device_age=timedelta(seconds=service_module.PENDING_DEVICE_SECONDS + 1))
+        self.assertTrue(second_bootstrapped)
+        self.assertNotEqual(second, first)
+
+    def test_a_code_asked_for_on_a_stored_session_keeps_no_pending_device(self):
+        reader = Mock()
+        reader.reconnect_session.side_effect = ws.MfaRequired()
+        with patch.object(app.service, "_load_session", return_value=self.session()), \
+                patch.object(service_module, "WealthsimpleReader", return_value=reader):
+            with self.assertRaises(ws.MfaRequired):
+                app.service.reconnect("owner@example.com", "synthetic-password")
+        session = self.db.rows["connectors/wealthsimple"].get("session") or {}
+        self.assertNotIn("pending_device", session)
+
     def test_expired_worker_cannot_change_pointer_or_publish_snapshot(self):
         lease, _ = app.service._acquire_lease()
         self.db.rows['connectors/wealthsimple']['sync']['lease_until'] = app.service._now() - timedelta(seconds=1)

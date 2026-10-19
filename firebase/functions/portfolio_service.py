@@ -37,6 +37,8 @@ BACKFILL_START = "1900-01-01T00:00:00Z"
 # so consecutive questions reuse it. The dashboard's Sync can force a new pass.
 ACTIVITY_FRESH_SECONDS = 600
 MAX_SNAPSHOT_BYTES = 800_000
+# How long the device a sign-in code was sent to is kept for the code to be entered from.
+PENDING_DEVICE_SECONDS = 600
 # Firestore allows 500 writes per transaction; one more is the connector state.
 LEASED_WRITES_PER_COMMIT = 400
 RECONNECT_ERRORS = {
@@ -275,6 +277,7 @@ class PortfolioService:
             "rotation_pending": False,
             "reconnect_required": False,
             "signed_out": False,
+            "pending_device": None,
         })
         # The replaced session's refresh token is spent. Destroy it so versions don't pile up
         # (each enabled version is billed); if this fails, the next rotation leaves one extra.
@@ -294,17 +297,45 @@ class PortfolioService:
 
         # A failed sign-in is not a sync failure, so nothing is recorded (no section).
         with self._lease(allow_reconnect=True) as (lease_id, version_name):
+            stored = True
             try:
                 session = self._load_session(lease_id, version_name)
             except (NotFound, FailedPrecondition):
                 if version_name:
                     raise
-                session = Session()  # First connection, or after signing out: nothing usable.
+                # First connection, or after signing out: nothing usable, except the device
+                # a code was just sent to. Wealthsimple only accepts the code from that device.
+                stored = False
+                session = self._pending_device() or Session()
             with closing(WealthsimpleReader(session)) as reader:
                 if not session.client_id or not session.session_id or not session.wssdi:
                     reader.bootstrap_session()
-                self._save_session(lease_id, reader.reconnect_session(username, password, otp))
+                try:
+                    signed_in = reader.reconnect_session(username, password, otp)
+                except MfaRequired:
+                    if not stored:
+                        self._update_session_state(lease_id, {"pending_device": {
+                            "client_id": session.client_id,
+                            "session_id": session.session_id,
+                            "wssdi": session.wssdi,
+                            "created_at": self._now(),
+                        }})
+                    raise
+                self._save_session(lease_id, signed_in)
         return {"result": "reconnect_succeeded"}
+
+    def _pending_device(self):
+        """The device a sign-in code was sent to in the last few minutes, without tokens."""
+        state = self._connector_ref(self._db()).get().to_dict() or {}
+        device = (state.get("session") or {}).get("pending_device") or {}
+        created_at = device.get("created_at")
+        if (not isinstance(created_at, datetime)
+                or self._now() - created_at > timedelta(seconds=PENDING_DEVICE_SECONDS)
+                or not all(isinstance(device.get(name), str) and device[name]
+                           for name in ("client_id", "session_id", "wssdi"))):
+            return None
+        return Session(client_id=device["client_id"], session_id=device["session_id"],
+                       wssdi=device["wssdi"])
 
     def sign_out(self):
         """Forget the Wealthsimple session by destroying every stored copy. Saved data stays."""
@@ -315,7 +346,8 @@ class PortfolioService:
                 client.destroy_secret_version(request={"name": version.name}, timeout=15)
             self._update_session_state(lease_id, {"secret_version": None, "signed_out": True,
                                                   "reconnect_required": False,
-                                                  "rotation_pending": False})
+                                                  "rotation_pending": False,
+                                                  "pending_device": None})
         return {"result": "signed_out"}
 
     def _save_snapshot(self, lease_id, snapshot):
