@@ -82,11 +82,12 @@ check-in (simulated, with made-up numbers):
 
 ## What gets created
 
-Everything lives in your Firebase project, and the dashboard links each piece:
+Everything lives in your Firebase project, and the dashboard's Developer tab
+links each piece:
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/apps-and-cloud-dark.png">
-  <img alt="Dashboard sections for AI apps and for your Firebase project's resources, each linking to the Firebase or Google Cloud console" src="docs/images/apps-and-cloud-light.png" width="560">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/firebase-project-dark.png">
+  <img alt="The Developer tab's Your Firebase project panel: your saved data, functions, the console and MCP service, the Wealthsimple session, logs, and usage and billing, each linking to the Firebase or Google Cloud console" src="docs/images/firebase-project-light.png" width="560">
 </picture>
 
 ## Later
