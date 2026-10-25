@@ -4,8 +4,6 @@ Ask Gemini, Claude, ChatGPT or any other MCP app about your Wealthsimple
 portfolio and activity, from a private connector that runs in your own
 Firebase project.
 
-A simulated example, with made-up numbers:
-
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/example-spending-dark.png">
   <img alt="Simulated example: asked what you spent on your card in August, the AI answers $1,284 after refunds, most of it at the grocery store" src="docs/images/example-spending-light.png" width="560">
@@ -73,7 +71,7 @@ In the dashboard: **AI apps** → your app → **How to connect**.
 </picture>
 
 Then just ask. A scheduled task in your AI app can also send you a weekly
-check-in (simulated, with made-up numbers):
+check-in:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/example-weekly-checkin-dark.png">
