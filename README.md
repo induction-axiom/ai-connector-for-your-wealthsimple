@@ -8,7 +8,7 @@ A simulated example, with made-up numbers:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/example-spending-dark.png">
-  <img alt="Simulated example: asked about August card spending, the AI answers with net spending after refunds, pending purchases listed separately, and the top five merchants" src="docs/images/example-spending-light.png" width="560">
+  <img alt="Simulated example: asked what you spent on your card in August, the AI answers $1,284 after refunds, most of it at the grocery store" src="docs/images/example-spending-light.png" width="560">
 </picture>
 
 - **Yours alone.** Each person deploys their own copy into their own Firebase
@@ -77,7 +77,7 @@ check-in (simulated, with made-up numbers):
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/example-weekly-checkin-dark.png">
-  <img alt="Simulated example: a weekly scheduled task summarizes new trades, dividends and card spending compared with the week before" src="docs/images/example-weekly-checkin-light.png" width="560">
+  <img alt="Simulated example: asked to sum up the week every Monday, the AI answers that you bought VEQT, got $29.48 in dividends, and spent 17% more on your card" src="docs/images/example-weekly-checkin-light.png" width="560">
 </picture>
 
 ## What gets created
@@ -125,6 +125,13 @@ Deploy one part after a change, then check the access boundaries:
 ```sh
 python3 firebase/scripts/manage.py deploy --target mcp --project YOUR_PROJECT_ID
 python3 firebase/scripts/manage.py doctor --project YOUR_PROJECT_ID
+```
+
+Regenerate the README's example images, with made-up data, without
+connecting to a deployment or Wealthsimple:
+
+```sh
+node tests_ui/screenshots.mjs
 ```
 
 ### Architecture
