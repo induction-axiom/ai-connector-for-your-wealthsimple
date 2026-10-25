@@ -22,7 +22,7 @@ const promoCSS = `
   h1 {margin:0; font-size:54px; line-height:1.04; letter-spacing:-.04em; font-weight:700}
   .user {width:fit-content; max-width:340px; margin:0 0 14px auto; padding:13px 18px;
     border-radius:22px 22px 6px 22px; background:var(--blue); color:#fff; font-size:18px}
-  .answer {padding:26px 28px; border-radius:24px; background:var(--surface)}
+  .answer {width:fit-content; min-width:300px; max-width:100%; padding:20px 22px; border-radius:22px 22px 22px 6px; background:var(--surface)}
   .figure {font-size:46px; line-height:1; font-weight:700; letter-spacing:-.035em; font-variant-numeric:tabular-nums}
   .caption {margin-top:8px; color:var(--muted); font-size:17px}
   .sample {position:absolute; right:64px; bottom:28px; margin:0; color:var(--muted); font-size:13px}
