@@ -278,11 +278,19 @@ class OAuthTests(unittest.TestCase):
                 "firebase": {"sign_in_provider": "google.com"}}
         with patch("app.firebase_auth.verify_id_token", return_value=good):
             self.assertEqual(verify_owner("synthetic", self.config), OWNER)
-        for bad in [{**good,"email_verified":False}, {**good,"email":"stranger@example.com"},
-                    {**good,"firebase":{"sign_in_provider":"custom"}}, {**good,"auth_time":0}]:
+        for bad in [{**good,"email_verified":False}, {**good,"firebase":{"sign_in_provider":"custom"}},
+                    {**good,"auth_time":0}]:
             with patch("app.firebase_auth.verify_id_token", return_value=bad):
-                with self.assertRaises(ConsentError):
+                with self.assertRaisesRegex(ConsentError, "^owner_google_login_required$"):
                     verify_owner("synthetic", self.config)
+        # Only a good, recent sign-in is told that it belongs to someone else.
+        with patch("app.firebase_auth.verify_id_token", return_value={**good, "email": "stranger@example.com"}):
+            with self.assertRaisesRegex(ConsentError, "^not_owner$"):
+                verify_owner("synthetic", self.config)
+        with patch("app.firebase_auth.verify_id_token", return_value={**good, "email": "stranger@example.com",
+                                                                      "auth_time": 0}):
+            with self.assertRaisesRegex(ConsentError, "^owner_google_login_required$"):
+                verify_owner("synthetic", self.config)
 
     def test_duplicate_parameters_and_oversize_rejected(self):
         r = self.client.post("/token", content="resource=x&resource=y", headers={"Content-Type":"application/x-www-form-urlencoded"})

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "firebase" / "mcp"))
 sys.path.insert(0, str(ROOT / "src"))
+from oauth import ConsentError
 from wealthsimple_connector.core.portfolio import project_portfolio
 
 BASE = "https://connector.example"
@@ -18,6 +19,8 @@ OWNER = {"uid": "synthetic-owner-id", "email": "owner@example.com"}
 def owner_identity(token, max_age=None):
     if token == "synthetic-owner-login":
         return OWNER
+    if token == "synthetic-stale-login":  # the owner, signed in too long ago
+        raise ConsentError("owner_google_login_required")
     return {"uid": "stranger", "email": "stranger@example.com"}
 
 

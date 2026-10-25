@@ -40,8 +40,9 @@ function status(connection) {
 }
 
 // Serve the dashboard; each /owner/refresh waits until the test settles it. Sign-in replies
-// with each of `challenges` first, then succeeds.
-async function openConsole(page, extra = {}, challenges = [], email = OWNER) {
+// with each of `challenges` first, then succeeds. stale: the owner's sign-in is older than the
+// server accepts.
+async function openConsole(page, extra = {}, challenges = [], email = OWNER, stale = false) {
   const state = {connection: "reconnect_required", refreshes: [], errors: [], reconnects: []};
   page.on("pageerror", error => state.errors.push(error.message));
   await page.route("**/*", async route => {
@@ -59,9 +60,9 @@ async function openConsole(page, extra = {}, challenges = [], email = OWNER) {
         body: readFileSync(new URL(name, STATIC))});
     }
     if (url.pathname === "/firebase-config") return json({authDomain: "example.test"});
-    if (url.pathname === "/owner/status" && email !== OWNER) return new Promise(settle => {
+    if (url.pathname === "/owner/status" && (email !== OWNER || stale)) return new Promise(settle => {
       state.turnAway = () => route.fulfill({status: 403, contentType: "application/json",
-        body: JSON.stringify({error: "owner_login_required"})}).then(settle);
+        body: JSON.stringify({error: stale ? "owner_login_required" : "not_owner"})}).then(settle);
     });
     if (url.pathname === "/owner/status") return json({...status(state.connection), ...extra});
     if (url.pathname === "/owner/reconnect/resend") {
@@ -272,6 +273,16 @@ test("another Google account is turned away before the dashboard shows", async (
   await expect(page.locator("#signin-message")).toHaveText(
     "someone@example.com doesn't own this deployment. Sign in with the account that does.");
   await expect(page.locator("#signin-message")).toHaveAttribute("data-tone", "danger");
+  await expect(page.locator("#signin")).toBeEnabled();
+  await expect(page.locator("#overview-view")).toBeHidden();
+  expect(state.errors).toEqual([]);
+});
+
+test("the owner's sign-in grown old asks to sign in again, not that they don't own it", async ({page}) => {
+  const state = await openConsole(page, {}, [], OWNER, true);
+  await expect.poll(() => typeof state.turnAway).toBe("function");
+  await state.turnAway();
+  await expect(page.locator("#signin-message")).toHaveText("Your sign-in expired. Sign in again to continue.");
   await expect(page.locator("#signin")).toBeEnabled();
   await expect(page.locator("#overview-view")).toBeHidden();
   expect(state.errors).toEqual([]);

@@ -50,7 +50,7 @@
         <p class="status-pill"><span class="dot" aria-hidden="true"></span><span id="status-label">Checking</span></p>
         <h1 id="status-title">Checking your connector…</h1>
         <p id="status-summary" class="lede"></p>
-        <div class="actions">
+        <div id="hero-actions" class="actions">
           <button id="primary-action" class="pill" type="button" disabled>Sync now</button>
         </div>
         <p id="message" class="note" role="status" aria-live="polite"></p>
@@ -118,21 +118,13 @@
           <p class="tile-footer"><span id="activity-updated">Not synced yet</span><span id="activity-chip" class="chip">—</span></p>
         </article>
       </div>
-
-      <div class="section-head">
-        <h2>Your Firebase project</h2>
-      </div>
-      <div class="panel">
-        <p class="panel-note">Everything runs in your own project. Each link opens it in the Firebase or Google Cloud console.</p>
-        <ul id="resources" class="resources"></ul>
-      </div>
     </section>
 
-    <!-- Developer: see exactly what the AI sees -->
+    <!-- Developer: what's deployed, where it runs, and exactly what the AI sees -->
     <section id="developer-view" class="view hidden" data-view="developer">
       <div class="hero compact">
         <h1>What your AI sees.</h1>
-        <p class="lede">The exact saved data your AI tools return. Viewing it never contacts Wealthsimple.</p>
+        <p class="lede">Where your connector runs, and the exact saved data your AI tools return. Viewing it never contacts Wealthsimple.</p>
       </div>
 
       <div class="panel split">
@@ -155,6 +147,12 @@
             <div><dt>Activity sync result</dt><dd id="fact-activity"><code>—</code></dd></div>
           </dl>
         </div>
+      </div>
+
+      <div class="panel">
+        <h2>Your Firebase project</h2>
+        <p class="panel-note">Everything runs in your own project. Each link opens it in the Firebase or Google Cloud console.</p>
+        <ul id="resources" class="resources"></ul>
       </div>
 
       <div class="panel">

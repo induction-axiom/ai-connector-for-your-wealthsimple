@@ -39,17 +39,20 @@ VERSION = BUILD["version"]
 
 
 def verify_owner(raw, config, max_age=CONSENT_AUTH_AGE):
+    """The owner's identity from a recent Google sign-in. A sign-in that is invalid or too old
+    raises owner_google_login_required; a good one by someone else raises not_owner."""
     try:
         decoded = firebase_auth.verify_id_token(raw)
-        if (decoded.get("email", "").casefold() != config.owner_email
-                or decoded.get("email_verified") is not True
+        if (decoded.get("email_verified") is not True
                 or decoded.get("firebase", {}).get("sign_in_provider") != "google.com"
                 or not decoded.get("uid")
                 or time.time() - decoded.get("auth_time", 0) > max_age):
             raise ValueError
-        return {"uid": decoded["uid"], "email": decoded["email"].casefold()}
     except Exception:
         raise ConsentError("owner_google_login_required") from None
+    if decoded.get("email", "").casefold() != config.owner_email:
+        raise ConsentError("not_owner")
+    return {"uid": decoded["uid"], "email": decoded["email"].casefold()}
 
 
 # How each refresh result answers "did this call update the data?", with a default reason.
@@ -462,7 +465,9 @@ def create_app(config, store, owner_verifier, portfolio_reader, cloud_functions,
     # ---------- Dashboard API ----------
 
     def owner_endpoint(handler):
-        """Require the owner's Google sign-in, pass the JSON body, and map bad input to 400."""
+        """Require the owner's Google sign-in, pass the JSON body, and map bad input to 400.
+        A sign-in that has grown old says so, apart from another account's: the dashboard
+        asks the first to sign in again, and tells the second it isn't the owner."""
         async def endpoint(request):
             authorization = request.headers.get("authorization", "")
             token = authorization.removeprefix("Bearer ")
@@ -470,10 +475,13 @@ def create_app(config, store, owner_verifier, portfolio_reader, cloud_functions,
             if authorization.startswith("Bearer ") and 10 <= len(token) <= 12000:
                 try:
                     owner = await anyio.to_thread.run_sync(verifier, token, OWNER_AUTH_AGE)
-                except ConsentError:
-                    pass
-            if not owner or owner.get("email", "").casefold() != config.owner_email:
+                except ConsentError as error:
+                    if str(error) == "not_owner":
+                        return JSONResponse({"error": "not_owner"}, 403)
+            if not owner:
                 return JSONResponse({"error": "owner_login_required"}, 403)
+            if owner.get("email", "").casefold() != config.owner_email:
+                return JSONResponse({"error": "not_owner"}, 403)
             try:
                 body = await request.json()
                 if not isinstance(body, dict):

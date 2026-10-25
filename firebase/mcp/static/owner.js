@@ -9,6 +9,8 @@ let auth, user, status, connectMode = null, showAmounts = false, busy = false;
 
 // ---------- Small helpers ----------
 
+// The server turned the sign-in away: its message is owner_login_required (too old or
+// invalid: sign in again) or not_owner (another Google account).
 class OwnerSessionExpired extends Error {}
 
 async function api(path, body = {}) {
@@ -16,7 +18,8 @@ async function api(path, body = {}) {
     headers: {"Authorization": "Bearer " + await user.getIdToken(),
       "Content-Type": "application/json"}, body: JSON.stringify(body)});
   const data = await response.json().catch(() => ({}));
-  if (response.status === 403 && data.error === "owner_login_required") throw new OwnerSessionExpired();
+  if (response.status === 403 && ["owner_login_required", "not_owner"].includes(data.error))
+    throw new OwnerSessionExpired(data.error);
   if (!response.ok && !data.result) throw new Error(data.error || "request_failed");
   return data;
 }
@@ -239,7 +242,7 @@ function renderStatus() {
   el("primary-action").textContent = state.action === "guide" ? "Connect an AI app" : "Sync now";
   // When a sign-in is needed, the form itself is the one action on the page.
   const needsSignIn = ["connect", "reconnect"].includes(state.action);
-  el("primary-action").classList.toggle("hidden", needsSignIn);
+  el("hero-actions").classList.toggle("hidden", needsSignIn);
   setConnectMode(needsSignIn ? state.action : null);
   el("ws-signout").classList.toggle("hidden", portfolio.connection_state !== "connected");
   el("apps-list").replaceChildren(...(apps.length ? apps.map(appRow) : [emptyRow("No apps are connected yet.")]));
@@ -794,8 +797,9 @@ async function signedIn(value) {
     await loadStatus();
   } catch (error) {
     // The first request is also where a non-owner Google account is turned away.
-    if (error instanceof OwnerSessionExpired) return expireSession(
-      `${user.email} doesn't own this deployment. Sign in with the account that does.`, "danger");
+    if (error instanceof OwnerSessionExpired) return error.message === "not_owner"
+      ? expireSession(`${user.email} doesn't own this deployment. Sign in with the account that does.`, "danger")
+      : expireSession();
     say("message", "Your connector's status couldn't be loaded. Try reloading.", "danger");
   }
   say("signin-message", "");

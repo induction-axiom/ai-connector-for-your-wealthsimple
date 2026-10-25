@@ -457,9 +457,13 @@ class RealAuthorizationTests(unittest.TestCase):
         headers = {"Origin": BASE, "Authorization": "Bearer synthetic-owner-login"}
         self.assertEqual(self.client.post("/owner/status", json={},
                                          headers={"Origin": BASE}).status_code, 403)
-        self.assertEqual(self.client.post("/owner/status", json={}, headers={
-            "Origin": BASE, "Authorization": "Bearer synthetic-stranger-login"
-        }).status_code, 403)
+        stranger = self.client.post("/owner/status", json={}, headers={
+            "Origin": BASE, "Authorization": "Bearer synthetic-stranger-login"})
+        self.assertEqual((stranger.status_code, stranger.json()), (403, {"error": "not_owner"}))
+        # The owner's own sign-in, grown too old, is asked to sign in again: not called a stranger.
+        stale = self.client.post("/owner/status", json={}, headers={
+            "Origin": BASE, "Authorization": "Bearer synthetic-stale-login"})
+        self.assertEqual((stale.status_code, stale.json()), (403, {"error": "owner_login_required"}))
         status = self.client.post("/owner/status", json={}, headers=headers)
         self.assertEqual(status.status_code, 200, status.text)
         diagnostics = status.json()["diagnostics"]

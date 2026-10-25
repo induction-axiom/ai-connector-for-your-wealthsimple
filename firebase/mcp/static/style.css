@@ -108,7 +108,8 @@ h1 { margin: 0; font-size: clamp(40px, 6.4vw, 64px); line-height: 1.06; letter-s
 h3 { margin: 32px 0 4px; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
 h2 { margin: 0 0 8px; font-size: 24px; line-height: 1.16; letter-spacing: -.02em; font-weight: 650; }
 .lede { max-width: 620px; margin: 18px auto 0; color: var(--muted); font-size: clamp(19px, 2.3vw, 24px); line-height: 1.38; letter-spacing: -.01em; }
-.note { min-height: 20px; margin: 18px 0 0; color: var(--muted); font-size: 14px; }
+.note { margin: 18px 0 0; color: var(--muted); font-size: 14px; }
+.note:empty { display: none; }
 .note[data-tone="success"] { color: var(--green); }
 .note[data-tone="warning"] { color: var(--amber); }
 .note[data-tone="danger"] { color: var(--red); }
@@ -146,6 +147,8 @@ input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 4px co
 
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 56px 4px 16px; }
 #overview-hero { padding-bottom: 8px; }
+/* The sign-in form, when it opens right below the hero. */
+#overview-hero + .panel { margin-top: 48px; }
 .connect + .section-head { margin-top: 32px; }
 .section-head h2 { margin: 0; }
 .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
@@ -227,7 +230,6 @@ input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 4px co
 .consent .hint { margin: 0 0 24px; overflow-wrap: anywhere; }
 .consent .actions { justify-content: stretch; margin-top: 8px; }
 .consent .actions .pill { flex: 1; }
-.consent .note:empty { display: none; }
 
 /* ---------- Small screens ---------- */
 @media (max-width: 900px) {
