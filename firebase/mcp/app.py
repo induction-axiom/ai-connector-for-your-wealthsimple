@@ -7,6 +7,8 @@ import time
 from urllib.parse import parse_qs, urlencode, urlsplit
 from typing import Literal, Annotated, Any
 
+from ai_connector_core.oauth import ConsentError, Provider
+from ai_connector_core.store import FirestoreStore
 import anyio
 from mcp.server import MCPServer
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
@@ -20,9 +22,7 @@ from starlette.routing import Route
 from activity_store import ActivityError, ActivityReader
 from cloud_functions import CloudFunctions
 from config import Config
-from oauth import ConsentError, Provider
 from portfolio_store import PortfolioReader
-from store import FirestoreStore
 from wealthsimple_connector.core.portfolio import SnapshotError
 
 STATIC = Path(__file__).parent / "static"

@@ -309,6 +309,8 @@ class ActivityReaderTests(unittest.TestCase):
 
 class RealAuthorizationTests(unittest.TestCase):
     """Tool and owner-console behaviour, reusing the OAuth test harness."""
+    make_store = test_oauth.OAuthTests.make_store
+    make_app = test_oauth.OAuthTests.make_app
     setUp = test_oauth.OAuthTests.setUp
     register = test_oauth.OAuthTests.register
     begin = test_oauth.OAuthTests.begin

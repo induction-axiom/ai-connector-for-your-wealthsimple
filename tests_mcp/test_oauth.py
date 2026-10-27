@@ -1,97 +1,23 @@
-"""OAuth/MCP boundary tests. All identities, grants and data are synthetic."""
-import base64
-from concurrent.futures import ThreadPoolExecutor
-import hashlib
-from pathlib import Path
-import sys
-import time
+"""OAuth/MCP boundary tests: the shared suite from ai_connector_core, plus what depends on
+this connector's tools and owner check. All identities, grants and data are synthetic."""
 import unittest
 from unittest.mock import patch
-from urllib.parse import parse_qs, urlsplit
 
-from fakes import (BASE, CALLBACK, OWNER, FakeActivityReader, FakeCloudFunctions,
-                   FakeReader, owner_identity)
-from starlette.testclient import TestClient
-from app import create_app, verify_owner, COOKIE
-from config import Config, SCOPE
-from oauth import ConsentError, digest, key
-from store import MemoryStore
+from ai_connector_core.oauth import ConsentError
+from ai_connector_core.testing import OAuthSuite
+from fakes import BASE, OWNER, FakeActivityReader, FakeCloudFunctions, FakeReader, owner_identity
+from app import create_app, verify_owner
+from config import Config
 
-class OAuthTests(unittest.TestCase):
-    def setUp(self):
-        self.store = MemoryStore()
-        self.config = Config(BASE, "synthetic-project", OWNER["email"], {})
+
+class OAuthTests(OAuthSuite, unittest.TestCase):
+    def make_app(self, store):
+        config = Config(BASE, "synthetic-project", OWNER["email"], {})
         self.reader = FakeReader()
         self.refresher = FakeCloudFunctions()
         self.activity_reader = FakeActivityReader()
-        self.app = create_app(self.config, self.store, owner_identity,
-                              self.reader, self.refresher, self.activity_reader)
-        self.client = TestClient(self.app, base_url=BASE, follow_redirects=False)
-        self.client.__enter__()
-        self.addCleanup(self.client.__exit__, None, None, None)
-        self.client_id = self.register()
-        self.verifier = "v" * 64
-        self.challenge = base64.urlsafe_b64encode(hashlib.sha256(self.verifier.encode()).digest()).decode().rstrip("=")
-
-    def register(self, **overrides):
-        body = {"client_name": "Synthetic client", "redirect_uris": [CALLBACK],
-                "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"],
-                "response_types": ["code"], "scope": SCOPE, **overrides}
-        response = self.client.post("/register", json=body)
-        self.assertEqual(response.status_code, 201, response.text)
-        self.assertIsNone(response.json().get("client_secret"))
-        return response.json()["client_id"]
-
-    def begin(self, **overrides):
-        params = {"client_id": self.client_id, "response_type": "code", "redirect_uri": CALLBACK,
-                  "scope": SCOPE, "state": "synthetic-state", "resource": BASE + "/mcp",
-                  "code_challenge": self.challenge, "code_challenge_method": "S256", **overrides}
-        return self.client.get("/authorize", params=params)
-
-    def consent(self):
-        response = self.begin()
-        self.assertEqual(response.status_code, 302, response.text)
-        ticket = parse_qs(urlsplit(response.headers["location"]).fragment)["request"][0]
-        r = self.client.post("/consent/start", headers={"Origin": BASE}, json={"request": ticket})
-        self.assertEqual(r.status_code, 200, r.text)
-        cookie = r.headers["set-cookie"]
-        self.assertIn("HttpOnly", cookie)
-        self.assertIn("Secure", cookie)
-        return {"request": ticket, "csrf": r.json()["csrf"], "id_token": "synthetic-owner-login", "decision": "approve"}
-
-    def get_code(self):
-        consent = self.consent()
-        r = self.client.post("/consent/finish", headers={"Origin": BASE}, json=consent)
-        self.assertEqual(r.status_code, 200, r.text)
-        query = parse_qs(urlsplit(r.json()["redirect"]).query)
-        self.assertEqual(query["state"], ["synthetic-state"])
-        self.assertEqual(query["iss"], [BASE])
-        return query["code"][0]
-
-    def exchange(self, code, **overrides):
-        return self.client.post("/token", data={"grant_type": "authorization_code", "code": code,
-            "client_id": self.client_id, "redirect_uri": CALLBACK, "code_verifier": self.verifier,
-            "resource": BASE + "/mcp", **overrides})
-
-    def tokens(self):
-        r = self.exchange(self.get_code())
-        self.assertEqual(r.status_code, 200, r.text)
-        return r.json()
-
-    def mcp(self, token, method="tools/list", params=None):
-        return self.client.post("/mcp", headers={"Authorization": "Bearer " + token,
-            "Accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2025-11-25"},
-            json={"jsonrpc": "2.0", "id": 1, "method": method, **({"params": params} if params else {})})
-
-    def test_discovery_and_no_anonymous_tool_access(self):
-        r = self.client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
-        self.assertEqual(r.status_code, 401)
-        self.assertIn("oauth-protected-resource/mcp", r.headers["www-authenticate"])
-        d = self.client.get("/.well-known/oauth-protected-resource/mcp").json()
-        self.assertEqual(d["resource"], BASE + "/mcp")
-        meta = self.client.get("/.well-known/oauth-authorization-server").json()
-        self.assertEqual(meta["code_challenge_methods_supported"], ["S256"])
-        self.assertEqual(meta["token_endpoint_auth_methods_supported"], ["none"])
+        return config, create_app(config, store, owner_identity,
+                                  self.reader, self.refresher, self.activity_reader)
 
     def test_end_to_end_initialize_list_and_call_status_tool(self):
         t = self.tokens()
@@ -107,192 +33,6 @@ class OAuthTests(unittest.TestCase):
         self.assertEqual(call.status_code, 200, call.text)
         data = call.json()["result"]["structuredContent"]
         self.assertEqual(data["owner_url"], BASE + "/owner")
-
-    def test_wrong_owner_and_forged_identity_denied(self):
-        body = self.consent()
-        body["id_token"] = "synthetic-stranger-login"
-        r = self.client.post("/consent/finish", headers={"Origin": BASE}, json=body)
-        self.assertEqual(r.status_code, 403)
-        self.assertFalse(any(k.startswith("code_") for k in self.store.data))
-
-    def test_csrf_cookie_and_origin_required(self):
-        body = self.consent()
-        r = self.client.post("/consent/finish", headers={"Origin": "https://evil.example"}, json=body)
-        self.assertEqual(r.status_code, 403)
-        bad = {**body, "csrf": "wrong"}
-        self.assertEqual(self.client.post("/consent/finish", headers={"Origin": BASE}, json=bad).status_code, 403)
-        self.client.cookies.clear()
-        self.assertEqual(self.client.post("/consent/finish", headers={"Origin": BASE}, json=body).status_code, 403)
-
-    def test_pkce_and_resource_enforced_before_issue(self):
-        code = self.get_code()
-        self.assertEqual(self.exchange(code, code_verifier="wrong").status_code, 400)
-        self.assertEqual(self.exchange(code, resource="https://evil.example/mcp").json()["error"], "invalid_target")
-        self.assertEqual(self.exchange(code).status_code, 200)
-
-    def test_wrong_callback_client_scope_or_pkce_rejected(self):
-        for overrides in [{"redirect_uri": "https://evil.example/callback"}, {"scope": "trade.write"},
-                          {"code_challenge_method": "plain"}, {"resource": "https://evil.example/mcp"}]:
-            r = self.begin(**overrides)
-            self.assertTrue(r.status_code == 400 or "error=" in r.headers.get("location", ""))
-            if "location" in r.headers:
-                self.assertIn("iss=", r.headers["location"])
-        for bad in ["http://evil.example/callback", "myapp://callback", "javascript:alert(1)",
-                    "https://evil.example/callback#x", "https://claude.ai@evil.example/callback",
-                    "http://localhost.evil.example/callback"]:
-            r = self.client.post("/register", json={"redirect_uris": [bad],
-                "token_endpoint_auth_method": "none", "scope": SCOPE})
-            self.assertEqual(r.status_code, 400, bad)
-
-    def test_any_https_or_local_app_can_register_and_connect(self):
-        for callback in ["https://agent.meta.ai/api/hatch/oauth/callback", "http://localhost:33418/callback",
-                         "http://127.0.0.1:8080/oauth/callback", "http://[::1]:9000/cb"]:
-            r = self.begin(client_id=self.register(redirect_uris=[callback]), redirect_uri=callback)
-            self.assertEqual(r.status_code, 302, callback)
-            self.assertTrue(r.headers["location"].startswith(BASE + "/consent#"), callback)
-
-    def test_claude_registers_without_scope(self):
-        # Claude's registration omits scope; the server fills in the only one it offers.
-        r = self.client.post("/register", json={"client_name": "Claude",
-            "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"], "token_endpoint_auth_method": "none",
-            "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"]})
-        self.assertEqual(r.status_code, 201, r.text)
-
-    def test_gemini_registers_production_callbacks_only(self):
-        # Gemini's real registration: three hosts, each under /r/ and /a/, naming this host.
-        tail = "/user_bound_custom-mcp-123456789-connector_example"
-        uris = [f"https://oauth-redirect{env}.googleusercontent.com/{kind}{tail}"
-                for kind in "ra" for env in ("-sandbox", "-test", "")]
-        r = self.client.post("/register", json={"client_name": "Google", "redirect_uris": uris,
-            "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"],
-            "response_types": ["code"]})
-        self.assertEqual(r.status_code, 201, r.text)
-        self.assertEqual(r.json()["redirect_uris"], [f"https://oauth-redirect.googleusercontent.com/{k}{tail}" for k in "ra"])
-        # Sandbox alone leaves no callback to keep.
-        r = self.client.post("/register", json={"token_endpoint_auth_method": "none",
-            "redirect_uris": ["https://oauth-redirect-sandbox.googleusercontent.com/r" + tail]})
-        self.assertEqual(r.status_code, 400)
-
-    def test_rejected_registration_is_logged_without_query_strings(self):
-        with self.assertLogs(level="WARNING") as logs:
-            r = self.client.post("/register", json={"client_name": "Gemini",
-                "redirect_uris": ["http://oauth-redirect.googleusercontent.com/r/x?state=secret"],
-                "token_endpoint_auth_method": "client_secret_basic", "scope": SCOPE})
-        self.assertEqual(r.status_code, 400)
-        line = next(m for m in logs.output if "register_rejected" in m)
-        self.assertIn("client_secret_basic", line)
-        self.assertIn("http://oauth-redirect.googleusercontent.com/r/x", line)
-        self.assertNotIn("state=secret", line)
-
-    def test_code_reuse_revokes_grant(self):
-        code = self.get_code()
-        token = self.exchange(code).json()["access_token"]
-        self.assertEqual(self.exchange(code).status_code, 400)
-        self.assertEqual(self.mcp(token).status_code, 401)
-
-    def test_parallel_code_exchange_issues_one_grant(self):
-        code = self.get_code()
-        with ThreadPoolExecutor(2) as pool:
-            responses = list(pool.map(lambda _: self.exchange(code), range(2)))
-        self.assertEqual(sorted(x.status_code for x in responses), [200, 400])
-        token = next(x.json()["access_token"] for x in responses if x.status_code == 200)
-        self.assertEqual(self.mcp(token).status_code, 401)
-
-    def test_refresh_rotation_reuse_and_revocation(self):
-        t = self.tokens()
-        body = {"grant_type": "refresh_token", "refresh_token": t["refresh_token"],
-                "client_id": self.client_id, "resource": BASE + "/mcp"}
-        r = self.client.post("/token", data=body)
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertNotEqual(r.json()["refresh_token"], t["refresh_token"])
-        # Reuse after the retry window is a replay: it revokes the grant.
-        self.store.data[key("refresh", t["refresh_token"])]["used_at"] -= 61
-        self.assertEqual(self.client.post("/token", data=body).status_code, 400)
-        self.assertEqual(self.mcp(r.json()["access_token"]).status_code, 401)
-
-    def test_refresh_retry_after_lost_response(self):
-        # Muse times out on a cold start and resends the same refresh token; both answers work.
-        t = self.tokens()
-        body = {"grant_type": "refresh_token", "refresh_token": t["refresh_token"], "client_id": self.client_id}
-        first = self.client.post("/token", data=body)
-        retry = self.client.post("/token", data=body)
-        self.assertEqual((first.status_code, retry.status_code), (200, 200), retry.text)
-        self.assertNotEqual(first.json()["refresh_token"], retry.json()["refresh_token"])
-        self.assertEqual(self.mcp(retry.json()["access_token"]).status_code, 200)
-        self.assertEqual(len([k for k in self.store.data if k.startswith("grant_")]), 1)
-        # Retries don't stretch the window: it runs from the first use.
-        self.store.data[key("refresh", t["refresh_token"])]["used_at"] -= 61
-        self.assertEqual(self.client.post("/token", data=body).status_code, 400)
-        self.assertEqual(self.mcp(retry.json()["access_token"]).status_code, 401)
-        # Codes get no window: a second exchange is still a replay.
-        code = self.get_code()
-        self.assertEqual(self.exchange(code).status_code, 200)
-        self.assertEqual(self.exchange(code).status_code, 400)
-
-    def test_client_may_omit_resource_but_not_name_another(self):
-        # Gemini sends resource when exchanging the code but not when refreshing; Muse never sends it.
-        t = self.tokens()
-        body = {"grant_type": "refresh_token", "refresh_token": t["refresh_token"], "client_id": self.client_id}
-        other = self.client.post("/token", data={**body, "resource": "https://evil.example/mcp"})
-        self.assertEqual(other.json()["error"], "invalid_target")
-        r = self.client.post("/token", data=body)
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(self.mcp(r.json()["access_token"]).status_code, 200)
-        # Authorize and code exchange without resource: both are bound to this endpoint.
-        params = {"client_id": self.client_id, "response_type": "code", "redirect_uri": CALLBACK,
-                  "scope": SCOPE, "state": "synthetic-state", "code_challenge": self.challenge,
-                  "code_challenge_method": "S256"}
-        r = self.client.get("/authorize", params=params)
-        self.assertTrue(r.headers["location"].startswith(BASE + "/consent#"), r.headers.get("location"))
-        ticket = parse_qs(urlsplit(r.headers["location"]).fragment)["request"][0]
-        self.assertEqual(self.store.data[key("pending", ticket)]["params"]["resource"], BASE + "/mcp")
-        code = self.get_code()
-        r = self.client.post("/token", data={"grant_type": "authorization_code", "code": code,
-            "client_id": self.client_id, "redirect_uri": CALLBACK, "code_verifier": self.verifier})
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(self.mcp(r.json()["access_token"]).status_code, 200)
-
-    def test_revoke_and_expiry(self):
-        t = self.tokens()
-        self.store.data[key("access", t["access_token"])]["expires_at"] = 0
-        self.assertEqual(self.mcp(t["access_token"]).status_code, 401)
-        r = self.client.post("/revoke", data={"client_id": self.client_id, "token": t["refresh_token"]})
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertTrue(next(v["revoked"] for k,v in self.store.data.items() if k.startswith("grant_")))
-
-    def test_store_does_not_contain_raw_code_or_bearer_tokens(self):
-        code = self.get_code()
-        t = self.exchange(code).json()
-        stored = repr(self.store.data)
-        for raw in [code, t["access_token"], t["refresh_token"], "synthetic-owner-login"]:
-            self.assertNotIn(raw, stored)
-
-    def test_wrong_audience_and_owner_configuration_change_rejected(self):
-        t = self.tokens()
-        self.store.data[key("access", t["access_token"])]["resource"] = "https://other.example/mcp"
-        self.assertEqual(self.mcp(t["access_token"]).status_code, 401)
-
-    def test_grant_extends_with_use_and_ends_after_idle(self):
-        t = self.tokens()
-        body = {"grant_type": "refresh_token", "refresh_token": t["refresh_token"],
-                "client_id": self.client_id, "resource": BASE + "/mcp"}
-        family = next(k for k in self.store.data if k.startswith("grant_"))
-        self.store.data[family]["expires_at"] = time.time() + 60  # about to lapse
-        r = self.client.post("/token", data=body)
-        self.assertEqual(r.status_code, 200, r.text)
-        # Using it pushed the end out to 90 days from now.
-        self.assertGreater(self.store.data[family]["expires_at"], time.time() + 89 * 86400)
-        self.store.data[family]["expires_at"] = time.time() - 1  # idle too long
-        body["refresh_token"] = r.json()["refresh_token"]
-        self.assertEqual(self.client.post("/token", data=body).status_code, 400)
-
-    def test_consent_expiry_and_replay(self):
-        body = self.consent()
-        for k in self.store.data:
-            if k.startswith("pending_"):
-                self.store.data[k]["expires_at"] = 0
-        r = self.client.post("/consent/finish", headers={"Origin": BASE}, json=body)
-        self.assertEqual(r.status_code, 403)
 
     def test_google_owner_verifier_checks_provider_verified_email_and_freshness(self):
         good = {**OWNER, "email_verified": True, "auth_time": __import__('time').time(),
@@ -312,17 +52,6 @@ class OAuthTests(unittest.TestCase):
                                                                       "auth_time": 0}):
             with self.assertRaisesRegex(ConsentError, "^owner_google_login_required$"):
                 verify_owner("synthetic", self.config)
-
-    def test_duplicate_parameters_and_oversize_rejected(self):
-        r = self.client.post("/token", content="resource=x&resource=y", headers={"Content-Type":"application/x-www-form-urlencoded"})
-        self.assertEqual(r.status_code, 400)
-        self.assertEqual(self.client.post("/register", content=b"x"*20000).status_code, 413)
-
-    def test_consent_shows_when_the_app_registered(self):
-        response = self.begin()
-        ticket = parse_qs(urlsplit(response.headers["location"]).fragment)["request"][0]
-        view = self.client.post("/consent/start", headers={"Origin": BASE}, json={"request": ticket}).json()
-        self.assertAlmostEqual(view["registered_at"], time.time(), delta=60)
 
 
 if __name__ == "__main__":
