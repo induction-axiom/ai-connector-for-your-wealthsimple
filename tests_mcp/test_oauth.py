@@ -205,8 +205,29 @@ class OAuthTests(unittest.TestCase):
         r = self.client.post("/token", data=body)
         self.assertEqual(r.status_code, 200, r.text)
         self.assertNotEqual(r.json()["refresh_token"], t["refresh_token"])
+        # Reuse after the retry window is a replay: it revokes the grant.
+        self.store.data[key("refresh", t["refresh_token"])]["used_at"] -= 61
         self.assertEqual(self.client.post("/token", data=body).status_code, 400)
         self.assertEqual(self.mcp(r.json()["access_token"]).status_code, 401)
+
+    def test_refresh_retry_after_lost_response(self):
+        # Muse times out on a cold start and resends the same refresh token; both answers work.
+        t = self.tokens()
+        body = {"grant_type": "refresh_token", "refresh_token": t["refresh_token"], "client_id": self.client_id}
+        first = self.client.post("/token", data=body)
+        retry = self.client.post("/token", data=body)
+        self.assertEqual((first.status_code, retry.status_code), (200, 200), retry.text)
+        self.assertNotEqual(first.json()["refresh_token"], retry.json()["refresh_token"])
+        self.assertEqual(self.mcp(retry.json()["access_token"]).status_code, 200)
+        self.assertEqual(len([k for k in self.store.data if k.startswith("grant_")]), 1)
+        # Retries don't stretch the window: it runs from the first use.
+        self.store.data[key("refresh", t["refresh_token"])]["used_at"] -= 61
+        self.assertEqual(self.client.post("/token", data=body).status_code, 400)
+        self.assertEqual(self.mcp(retry.json()["access_token"]).status_code, 401)
+        # Codes get no window: a second exchange is still a replay.
+        code = self.get_code()
+        self.assertEqual(self.exchange(code).status_code, 200)
+        self.assertEqual(self.exchange(code).status_code, 400)
 
     def test_client_may_omit_resource_but_not_name_another(self):
         # Gemini sends resource when exchanging the code but not when refreshing; Muse never sends it.
@@ -276,18 +297,18 @@ class OAuthTests(unittest.TestCase):
     def test_google_owner_verifier_checks_provider_verified_email_and_freshness(self):
         good = {**OWNER, "email_verified": True, "auth_time": __import__('time').time(),
                 "firebase": {"sign_in_provider": "google.com"}}
-        with patch("app.firebase_auth.verify_id_token", return_value=good):
+        with patch("app.id_token_claims", return_value=good):
             self.assertEqual(verify_owner("synthetic", self.config), OWNER)
         for bad in [{**good,"email_verified":False}, {**good,"firebase":{"sign_in_provider":"custom"}},
                     {**good,"auth_time":0}]:
-            with patch("app.firebase_auth.verify_id_token", return_value=bad):
+            with patch("app.id_token_claims", return_value=bad):
                 with self.assertRaisesRegex(ConsentError, "^owner_google_login_required$"):
                     verify_owner("synthetic", self.config)
         # Only a good, recent sign-in is told that it belongs to someone else.
-        with patch("app.firebase_auth.verify_id_token", return_value={**good, "email": "stranger@example.com"}):
+        with patch("app.id_token_claims", return_value={**good, "email": "stranger@example.com"}):
             with self.assertRaisesRegex(ConsentError, "^not_owner$"):
                 verify_owner("synthetic", self.config)
-        with patch("app.firebase_auth.verify_id_token", return_value={**good, "email": "stranger@example.com",
+        with patch("app.id_token_claims", return_value={**good, "email": "stranger@example.com",
                                                                       "auth_time": 0}):
             with self.assertRaisesRegex(ConsentError, "^owner_google_login_required$"):
                 verify_owner("synthetic", self.config)

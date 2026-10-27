@@ -3,8 +3,13 @@
 import json
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
-from google.auth.transport.requests import Request as AuthRequest
-from google.oauth2.id_token import fetch_id_token
+
+def fetch_id_token(url):
+    """An ID token for an IAM-private function. google.auth's requests transport loads
+    here, on the first call, rather than at every cold start."""
+    from google.auth.transport.requests import Request as AuthRequest
+    from google.oauth2 import id_token
+    return id_token.fetch_id_token(AuthRequest(), url)
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -19,7 +24,7 @@ class CloudFunctions:
 
     @staticmethod
     def _post(url, body, timeout):
-        token = fetch_id_token(AuthRequest(), url)
+        token = fetch_id_token(url)
         request = Request(url, data=json.dumps(body).encode(), method="POST",
                           headers={"Authorization": "Bearer " + token,
                                    "Content-Type": "application/json"})

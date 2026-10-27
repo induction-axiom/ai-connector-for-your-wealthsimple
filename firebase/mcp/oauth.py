@@ -32,6 +32,10 @@ def random_token():
 
 # A connected app stays signed in while it is used; 90 days without use ends the grant.
 GRANT_IDLE_SECONDS = 90 * 86400
+# A refresh token presented again this soon after it was rotated is a retry, not a replay:
+# Muse gives up on a slow /token (a cold start takes 5-9 s) and resends the same token.
+# It gets a fresh pair in the same grant; later reuse still revokes the grant.
+REFRESH_RETRY_SECONDS = 60
 # Gemini registers six callbacks: production, sandbox and test hosts, each under /r/ and /a/.
 # We keep production only.
 GEMINI_UNUSED = ("https://oauth-redirect-sandbox.googleusercontent.com/",
@@ -190,7 +194,8 @@ class Provider:
                     or source["owner_email"] != self.config.owner_email
                     or source["scopes"] != [self.config.scope] or scopes != [self.config.scope]):
                 return False, {}
-            if source["used"]:
+            retry = refresh and source["used"] and now - source.get("used_at", 0) <= REFRESH_RETRY_SECONDS
+            if source["used"] and not retry:
                 return False, {family_key: {**family, "revoked": True}} if family else {}
             if refresh and (not family or family["revoked"] or family["expires_at"] <= now):
                 return False, {}
@@ -203,7 +208,8 @@ class Provider:
                       "subject": family["subject"], "owner_email": family["owner_email"],
                       "scopes": scopes, "family": family_key, "purge_at": family["purge_at"]}
             return True, {
-                source_key: {**source, "used": True, "family": family_key},
+                source_key: {**source, "used": True, "family": family_key,
+                             "used_at": source.get("used_at") or now},
                 family_key: family,
                 access_key: {**common, "expires_at": now + 900},
                 refresh_key: {**common, "expires_at": family["expires_at"], "used": False},
